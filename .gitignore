@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Salidas del pipeline
+out/
+*.tmp
+
+# SO / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

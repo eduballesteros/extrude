@@ -1,0 +1,60 @@
+[project]
+name = "extrude"
+version = "0.1.0"
+description = "Pipeline DWG/DXF → glTF 3D con metadatos por capa"
+requires-python = ">=3.12"
+dependencies = [
+    "ezdxf>=1.3",
+    "shapely>=2.0",
+    "numpy>=2.0",
+    "mapbox-earcut>=1.0",
+    "scipy>=1.13",
+    "trimesh>=4.4",
+    "pygltflib>=1.16",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+]
+
+[project.scripts]
+extrude = "extrude.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-pyyaml",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/extrude"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF", "PTH", "S"]
+ignore = ["S603"]  # subprocess sin shell: las rutas se sanean antes (ver converters/)
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["extrude"]
+
+[[tool.mypy.overrides]]
+module = ["ezdxf.*", "shapely.*", "mapbox_earcut.*", "scipy.*", "trimesh.*", "pygltflib.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
