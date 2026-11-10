@@ -88,6 +88,11 @@ bench n='50000':
     uv run python tests/sample_dxf.py ../out/bench {{n}}
     uv run extrude convert ../out/bench/city_{{n}}.dxf -c ../samples/config/city.yaml -o ../out/bench/city_{{n}}
 
+# Servidor local de conversión: el visor convierte los DWG/DXF que se le arrastran
+[working-directory: 'pipeline']
+serve:
+    uv run extrude serve
+
 # Arranca el visor en modo desarrollo
 [working-directory: 'viewer']
 dev:

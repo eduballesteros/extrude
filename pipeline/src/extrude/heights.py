@@ -22,6 +22,7 @@ class HeightOrigin(StrEnum):
     ATTRIBUTE = "attribute"
     TEXT = "text"
     ELEVATION = "elevation"
+    BLOCK = "block"
     FLOORS = "floors"
     FIXED = "height"
     DEFAULT = "default_height"
@@ -93,6 +94,13 @@ def _from_source(footprint: Footprint, rule: LayerRule, texts: TextIndex) -> Hei
             return _pick(values, rule, HeightOrigin.ATTRIBUTE)
         case HeightSource.TEXT:
             return _pick(_text_values(footprint, rule, texts), rule, HeightOrigin.TEXT)
+        case HeightSource.BLOCK:
+            values = [
+                v
+                for v in (rule.block_value(s.block_path) for s in footprint.sources)
+                if v is not None
+            ]
+            return _pick(values, rule, HeightOrigin.BLOCK)
         case HeightSource.ELEVATION:
             height = footprint.elevation - rule.base_elevation
             return HeightResult(height, HeightOrigin.ELEVATION) if height > 0 else None

@@ -21,8 +21,15 @@ ignore) y la fuente de altura de los edificios con este orden:
 2. Textos con un patrón reconocible → `height_from: text`, eligiendo el patrón con más
    coincidencias: `B+3` (baja + n), números romanos (`IV`, estilo Catastro), `4P`, `12.5m` o un
    número suelto.
-3. Polilíneas con cota Z → `height_from: elevation`.
-4. Si no encuentra nada → solo `default_height: 9.0`.
+3. Si los edificios son bloques (INSERT) → `height_from: block` con un `block_values` provisional
+   por tipo de bloque (a ajustar).
+4. Polilíneas con cota Z → `height_from: elevation`; si la altura sale de otra fuente y hay cota,
+   `base_from_elevation: true`.
+5. Si no encuentra nada → solo `default_height: 9.0`.
+
+Solo cuenta los textos que caen **dentro** de las plantas (no leyendas ni títulos), y un número
+suelto únicamente si aparece en al menos la mitad de ellas. Los árboles en bloque se proponen como
+volúmenes de 6 m y las capas de "terreno" sin cotas Z se ignoran (no sirven para el TIN).
 
 Cada regla generada lleva comentarios con la evidencia (ejemplos de textos, atributos vistos). Es
 un **borrador**: revísalo siempre.
@@ -56,7 +63,8 @@ layers:              # lista ordenada: gana la PRIMERA regla cuyo patrón encaje
 |---|---|---|---|
 | `match` | glob | — (obligatorio) | Patrón de nombre de capa, sin distinguir mayúsculas (`*`, `?`, `[abc]`). Para un nombre con esos caracteres, escápalos: `EDIF[*]`. |
 | `kind` | `building`/`road`/`water`/`vegetation`/`terrain`/`line`/`ignore` | — (obligatorio) | Qué se genera (ver tabla de kinds). |
-| `height_from` | `attribute`/`text`/`elevation` | — | Fuente de altura por polígono (prioridad 1). |
+| `height_from` | `attribute`/`text`/`elevation`/`block` | — | Fuente de altura por polígono (prioridad 1). |
+| `block_values` | `{patrón de bloque: número}` | — | Con `height_from: block`: valor según el nombre del bloque que contiene el polígono (glob, sin distinguir mayúsculas; gana el bloque más interno). Se interpreta según `value_means`. |
 | `attribute` | str | — | Etiqueta del ATTRIB (obligatoria con `height_from: attribute`). Sin distinguir mayúsculas. |
 | `text_regex` | regex | `(\d+)\s*P` | Con `height_from: text`. El **grupo 1** es el número. Admite decimales con coma y números romanos. Escríbelo entre comillas simples en el YAML. |
 | `text_layers` | lista de globs | todas | Capas donde buscar los textos. Recomendado acotarlo para no confundir rótulos. |
@@ -67,6 +75,7 @@ layers:              # lista ordenada: gana la PRIMERA regla cuyo patrón encaje
 | `height` | float ≥ 0 (m) | — | Altura fija (prioridad 3). |
 | `default_height` | float ≥ 0 (m) | — | Último recurso (prioridad 4). |
 | `base_elevation` | float (m) | `0.0` | Cota de la base de la extrusión. Con `height_from: elevation`, altura = Z − base. |
+| `base_from_elevation` | bool | `false` | La base de cada polígono es su propia cota Z (+ `base_elevation`). Útil cuando las plantas están dibujadas a la cota del terreno. |
 | `detect_holes` | bool | `true` | Un contorno dentro de otro de la misma capa es un patio (par/impar). Desactívalo si en la capa hay volúmenes contenidos en otros (p. ej. torre sobre podio dibujados en la misma capa). Los HATCH siempre usan par/impar. |
 | `bottom_cap` | bool | `false` | Generar la cara inferior (solo si el modelo se verá desde abajo; ahorra triángulos). |
 | `material` | objeto | según `kind` | `color` (`#rrggbb`), `roughness` y `metalness` (0–1), `opacity` (0–1). |
@@ -123,6 +132,13 @@ no sea `ignore`.
   height_from: attribute
   attribute: ALTURA
   value_means: meters
+
+# Edificios como bloques sin altura en el dibujo: plantas por tipo de bloque
+- match: "-EDIFICIOS"
+  kind: building
+  height_from: block
+  block_values: { "VIV.UNIFAM": 2, "bloque lineal": 5, "torres*": 12 }
+  base_from_elevation: true   # la planta está dibujada a la cota de su base
 
 # Polilíneas con elevación = cota de cubierta; terreno a 102,5 m
 - match: "CUBIERTAS"

@@ -180,6 +180,20 @@
         margin: 0;
         overflow-wrap: anywhere;
       }
+      .toolbar a {
+        color: #9cc8ff;
+      }
+      .conversion {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .conversion button {
+        background: #3a3c42;
+        color: #eee;
+        border: 1px solid #4a4c52;
+        border-radius: 4px;
+      }
       .stats {
         position: fixed;
         bottom: 8px;
@@ -195,8 +209,11 @@
   <body>
     <div id="app"></div>
     <div class="toolbar">
-      <label>Abrir GLB <input id="file" type="file" accept=".glb,.gltf" /></label>
-      <span id="status">Arrastra un .glb o usa ?model=URL</span>
+      <label title=".dwg/.dxf se convierten con extrude serve; .yaml fija la configuración">
+        Abrir plano o modelo
+        <input id="file" type="file" accept=".dwg,.dxf,.glb,.yaml,.yml" />
+      </label>
+      <span id="status">Arrastra un .dwg/.dxf (con extrude serve) o un .glb</span>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

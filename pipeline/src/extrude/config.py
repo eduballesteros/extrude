@@ -2,7 +2,7 @@
 
 Cada proyecto define sus reglas por capa: qué es cada capa (`kind`) y de dónde sale la altura.
 Prioridad de la altura de un polígono:
-  1. `height_from` (attribute | text | elevation), si encuentra un valor;
+  1. `height_from` (attribute | text | elevation | block), si encuentra un valor;
   2. `floors` × `floor_height`;
   3. `height` (altura fija);
   4. `default_height`.
@@ -51,6 +51,7 @@ class HeightSource(StrEnum):
     ATTRIBUTE = "attribute"
     TEXT = "text"
     ELEVATION = "elevation"
+    BLOCK = "block"
 
 
 class ValueMeaning(StrEnum):
@@ -105,7 +106,9 @@ class LayerRule(_Strict):
     floors: Annotated[int, Field(ge=0)] | None = None
     floor_height: Positive = DEFAULT_FLOOR_HEIGHT_M
     default_height: NonNegative | None = None
+    block_values: dict[str, float] = Field(default_factory=dict)
     base_elevation: float = 0.0
+    base_from_elevation: bool = False
     detect_holes: bool = True
     bottom_cap: bool = False
     material: Material | None = None
@@ -126,10 +129,22 @@ class LayerRule(_Strict):
     def _coherent(self) -> Self:
         if self.height_from is HeightSource.ATTRIBUTE and not self.attribute:
             raise ValueError("height_from: attribute requiere 'attribute' (etiqueta del ATTRIB)")
+        if self.height_from is HeightSource.BLOCK and not self.block_values:
+            raise ValueError("height_from: block requiere 'block_values' {nombre de bloque: valor}")
+        if any(v < 0 for v in self.block_values.values()):
+            raise ValueError("block_values no admite valores negativos")
         return self
 
     def matches(self, layer: str) -> bool:
         return fnmatch.fnmatchcase(layer.upper(), self.match.upper())
+
+    def block_value(self, block_path: tuple[str, ...]) -> float | None:
+        """Valor del bloque más interno de lock_path que encaje con algún patrón."""
+        for block in reversed(block_path):
+            for pattern, value in self.block_values.items():
+                if fnmatch.fnmatchcase(block.upper(), pattern.upper()):
+                    return value
+        return None
 
     def text_layer_matches(self, layer: str) -> bool:
         if self.text_layers is None:

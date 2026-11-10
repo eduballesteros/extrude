@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from extrude.converters.base import STAGED_INPUT_NAME, STAGED_OUTPUT_NAME, DwgConverter
@@ -17,7 +18,15 @@ class LibreDwgConverter(DwgConverter):
     )
 
     def candidate_paths(self) -> list[Path]:
-        return [Path("/usr/bin/dwg2dxf"), Path("/usr/local/bin/dwg2dxf")]
+        # Windows: el .zip oficial no tiene instalador; ubicaciones habituales al descomprimirlo
+        roots = [Path(os.environ.get("LOCALAPPDATA", "")) / "Programs", Path("C:/Program Files")]
+        found = [
+            exe
+            for root in roots
+            if root.is_dir()
+            for exe in sorted(root.glob("libredwg*/dwg2dxf.exe"), reverse=True)
+        ]
+        return [*found, Path("/usr/bin/dwg2dxf"), Path("/usr/local/bin/dwg2dxf")]
 
     def build_command(self, executable: Path, in_dir: Path, out_dir: Path) -> list[str]:
         return [

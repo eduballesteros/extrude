@@ -32,7 +32,8 @@ Sin conversor, Extrude solo acepta `.dxf`. Comprueba lo que tienes con `just doc
 - **LibreDWG** (`dwg2dxf`, open source; soporte parcial de DWG recientes):
   - Debian/Ubuntu: `sudo apt install libredwg-tools`
   - macOS: `brew install libredwg`
-  - Windows: binarios en <https://github.com/LibreDWG/libredwg/releases>
+  - Windows: descomprime el `.zip` de <https://github.com/LibreDWG/libredwg/releases> en
+    `%LOCALAPPDATA%\Programs\libredwg-X.Y` (se detecta solo). Probado con 0.14 y un DWG 2018 real.
   - Ruta personalizada: `EXTRUDE_DWG2DXF_PATH`.
 - **Manual**: en AutoCAD/BricsCAD, `SAVEAS` → DXF (versión 2018 o 2013).
 
@@ -94,6 +95,18 @@ lista todo lo leído, convertido, ignorado, reparado o descartado, con su capa. 
 [docs/EXPORT_FORMATS.md](docs/EXPORT_FORMATS.md).
 
 Con las muestras: `just convert-samples` y `just validate out/block_2d/model.glb`.
+
+## Convertir arrastrando al visor
+
+```sh
+just serve   # servidor local de conversión (http://127.0.0.1:8765)
+just dev     # visor
+```
+
+Arrastra un `.dwg` o `.dxf` al visor. Si antes sueltas (o eliges con `Config YAML…`) el YAML del
+proyecto, se usa ese; si no, se genera un borrador automático. Tras convertir aparecen enlaces al
+GLB, al informe y a la configuración usada o generada. El servidor solo escucha en local, limita el
+tamaño (`--max-mb`) y conserva los 10 últimos trabajos.
 
 ## Visor
 

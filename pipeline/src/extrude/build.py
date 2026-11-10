@@ -174,9 +174,8 @@ def _extrude_layer(
         if resolved.height is None:
             stats.dropped_without_height += 1
             continue
-        raw = extrude(
-            footprint.polygon, rule.base_elevation, resolved.height, bottom=rule.bottom_cap
-        )
+        base = rule.base_elevation + (footprint.elevation if rule.base_from_elevation else 0.0)
+        raw = extrude(footprint.polygon, base, resolved.height, bottom=rule.bottom_cap)
         mesh, degenerate = drop_degenerate(raw)
         stats.degenerate_triangles += degenerate
         source_type = "+".join(sorted({s.dxftype for s in footprint.sources}))

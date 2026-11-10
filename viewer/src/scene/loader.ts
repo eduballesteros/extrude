@@ -39,10 +39,13 @@ async function parse(bytes: ArrayBuffer, name: string): Promise<LoadedModel> {
   return toModel(gltf, name, bytes);
 }
 
-export async function loadFromUrl(url: string): Promise<LoadedModel> {
+export async function loadFromUrl(url: string, name?: string): Promise<LoadedModel> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status} al descargar ${url}`);
-  return parse(await response.arrayBuffer(), decodeURIComponent(url.split('/').pop() ?? url));
+  return parse(
+    await response.arrayBuffer(),
+    name ?? decodeURIComponent(url.split('/').pop() ?? url),
+  );
 }
 
 export async function loadFromFile(file: File): Promise<LoadedModel> {

@@ -21,6 +21,7 @@ from extrude.init_config import draft_config
 from extrude.inspection import format_text, summarize
 from extrude.model import LengthUnit
 from extrude.node_tools import Compression
+from extrude.server import DEFAULT_MAX_MB, DEFAULT_ORIGINS, DEFAULT_PORT, create_server
 
 app = typer.Typer(
     help="Extrude: convierte DWG/DXF urbanos en modelos 3D glTF.",
@@ -111,6 +112,31 @@ def convert(
     typer.echo(f"Informe: {out / 'report.md'}")
 
 
+@app.command()
+def serve(
+    host: Annotated[
+        str, typer.Option(help="Interfaz de red (solo local por defecto)")
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Puerto")] = DEFAULT_PORT,
+    max_mb: Annotated[int, typer.Option(help="Tamaño máximo del DWG/DXF (MB)")] = DEFAULT_MAX_MB,
+    origin: Annotated[
+        list[str] | None, typer.Option(help="Origen permitido por CORS (repetible)")
+    ] = None,
+    jobs_dir: Annotated[Path | None, typer.Option(help="Carpeta de trabajos")] = None,
+) -> None:
+    """Servidor local para que el visor convierta DWG/DXF arrastrándolos."""
+    origins = tuple(origin) if origin else DEFAULT_ORIGINS
+    server = create_server(host, port, jobs_dir=jobs_dir, max_mb=max_mb, allowed_origins=origins)
+    typer.echo(f"Extrude escuchando en http://{host}:{port} (orígenes: {', '.join(origins)})")
+    typer.echo("Abre el visor y arrastra un .dwg o .dxf. Ctrl+C para salir.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        typer.echo("Servidor detenido.")
+    finally:
+        server.server_close()
+
+
 @app.command("init-config")
 def init_config(
     source: Annotated[Path, typer.Argument(help="Archivo .dwg o .dxf del proyecto")],
@@ -124,7 +150,9 @@ def init_config(
     with _user_errors(), tempfile.TemporaryDirectory(prefix="extrude-") as workdir:
         if output is not None and output.exists() and not force:
             raise ExtrudeError(f"'{output}' ya existe.", "Usa otro nombre con -o o añade --force.")
-        document = draft_config(read_dxf(ensure_dxf(source, Path(workdir)), units_override=units))
+        document = draft_config(
+            read_dxf(ensure_dxf(source, Path(workdir)), units_override=units), source.name
+        )
         if output is None:
             typer.echo(document)
         else:

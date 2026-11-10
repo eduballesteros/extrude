@@ -86,11 +86,19 @@ def build_footprints(
     rings = _deduplicate(rings, tolerance, stats)
 
     footprints = _assemble(rings, stats) if detect_holes else [_solid(r) for r in rings]
+    # Un HATCH que rellena exactamente un contorno ya dibujado (muy habitual) no es otro sólido
+    seen = {_key(f.polygon, tolerance) for f in footprints}
     for hatch in hatches:
         hatch_rings: list[_Ring] = []
         for loop in hatch.loops:
             hatch_rings.extend(_valid_rings(loop * scale, (hatch.source,), min_area, stats))
-        footprints.extend(_assemble(hatch_rings, stats))
+        for footprint in _assemble(hatch_rings, stats):
+            key = _key(footprint.polygon, tolerance)
+            if key in seen:
+                stats.duplicates_removed += 1
+                continue
+            seen.add(key)
+            footprints.append(footprint)
     return footprints, stats
 
 
@@ -183,11 +191,17 @@ def _snap_endpoints(coords: list[NDArray[np.float64]], tolerance: float) -> None
             coords[m // 2][0 if m % 2 == 0 else -1, :2] = target
 
 
+def _key(polygon: Polygon, tolerance: float) -> bytes:
+    """Huella geométrica independiente del sentido y del vértice inicial."""
+    key: bytes = shapely.normalize(shapely.set_precision(polygon, tolerance)).wkb
+    return key
+
+
 def _deduplicate(rings: list[_Ring], tolerance: float, stats: TopologyStats) -> list[_Ring]:
     seen: set[bytes] = set()
     unique: list[_Ring] = []
     for ring in rings:
-        key = shapely.normalize(shapely.set_precision(ring.polygon, tolerance)).wkb
+        key = _key(ring.polygon, tolerance)
         if key in seen:
             stats.duplicates_removed += 1
             continue

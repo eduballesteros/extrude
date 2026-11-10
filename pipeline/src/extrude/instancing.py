@@ -4,8 +4,10 @@ Una "instancia" es el conjunto de objetos de una capa que proceden de un mismo I
 nivel. Un bloque se instancia solo si:
   - tiene al menos `min_count` instancias en la capa;
   - cada instancia, llevada a coordenadas del bloque con la inversa de su matriz, coincide con
-    el prototipo (mismos vértices dentro de la tolerancia). Así, bloques cuya geometría depende
-    del INSERT (alturas por atributo, contornos que se fusionan con otros) no se instancian;
+    el prototipo: mismos vértices dentro de la tolerancia o, si las curvas se aplanaron con otra
+    densidad (INSERT escalados), misma caja envolvente y misma área de superficie (±1 %). Así,
+    bloques cuya geometría depende del INSERT (alturas por atributo, contornos que se fusionan
+    con otros) no se instancian;
   - la matriz no refleja (determinante > 0) y se descompone en TRS sin cizalla.
 El resto de objetos sigue el camino normal (fusión por capa).
 """
@@ -20,9 +22,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from extrude.build import SceneObject
-from extrude.extrusion import MeshData, concat
+from extrude.extrusion import MeshData, concat, triangle_areas
 
 Matrix = NDArray[np.float64]  # 4×4, convención columna (p' = M @ p)
+EQUIVALENT_AREA_RTOL = 0.01
+PLANAR_EPS = 1e-9
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +128,8 @@ def _try_group(
         ref = members[0].instance
         matrix = block_matrix(ref.matrix, scale) if ref is not None else None
         hard = {o.hard_edges for o in members}
+        if matrix is not None and hard == {False}:
+            matrix = _extrusion_matrix(matrix)
         if matrix is None or decompose_trs(matrix) is None or len(hard) != 1:
             rejected.append(members)  # reflejada, con cizalla o mezcla de tipos
             continue
@@ -133,13 +139,46 @@ def _try_group(
         if reference is None:
             prototype, reference = MeshData(local, mesh.faces), signature
             shape = (len(members), hard.pop())
-        elif (len(members), hard.pop()) != shape or not _same(signature, reference, tolerance):
+        elif (len(members), hard.pop()) != shape or not (
+            _same(signature, reference, tolerance)
+            or _equivalent(MeshData(local, mesh.faces), prototype, tolerance)  # type: ignore[arg-type]
+        ):
             rejected.append(members)
             continue
         matrices.append(matrix)
     if prototype is None or shape is None:
         return None, instances
     return InstanceGroup(block, prototype, shape[1], matrices, shape[0]), rejected
+
+
+def _extrusion_matrix(matrix: Matrix) -> Matrix:
+    """Para huellas 2D extruidas: la altura está en metros reales y no escala con el INSERT.
+
+    Si el INSERT solo gira alrededor de Z y escala en XY (lo normal en planta), la instancia
+    usa escala 1 en Z para que el prototipo conserve su altura real. Si no es plano, se deja
+    la matriz completa (y la comprobación de forma decidirá).
+    """
+    planar = np.allclose(matrix[2, :2], 0, atol=PLANAR_EPS) and np.allclose(
+        matrix[:2, 2], 0, atol=PLANAR_EPS
+    )
+    if not planar or matrix[2, 2] <= 0:
+        return matrix
+    fixed = matrix.copy()
+    fixed[2, 2] = 1.0
+    return fixed
+
+
+def _equivalent(a: MeshData, b: MeshData, tolerance: float) -> bool:
+    """Misma forma aunque con distinta densidad de vértices (curvas aplanadas a otra escala):
+    caja envolvente igual (± tolerancia) y área de superficie igual (± EQUIVALENT_AREA_RTOL).
+    Una altura distinta o un contorno fusionado con un vecino cambian una de las dos."""
+    lo_a, hi_a = a.vertices.min(axis=0), a.vertices.max(axis=0)
+    lo_b, hi_b = b.vertices.min(axis=0), b.vertices.max(axis=0)
+    if not (np.allclose(lo_a, lo_b, atol=tolerance) and np.allclose(hi_a, hi_b, atol=tolerance)):
+        return False
+    area_a = float(triangle_areas(a.vertices, a.faces).sum())
+    area_b = float(triangle_areas(b.vertices, b.faces).sum())
+    return abs(area_a - area_b) <= EQUIVALENT_AREA_RTOL * max(area_a, area_b)
 
 
 def _same(a: NDArray[np.float64], b: NDArray[np.float64], tolerance: float) -> bool:

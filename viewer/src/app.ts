@@ -107,9 +107,10 @@ export class App {
     for (const listener of this.listeners[event]) listener();
   }
 
-  async load(source: string | File): Promise<LoadedModel> {
+  /** `name` identifica el modelo (vistas guardadas, script de Blender); por defecto, el archivo. */
+  async load(source: string | File, name?: string): Promise<LoadedModel> {
     const model =
-      typeof source === 'string' ? await loadFromUrl(source) : await loadFromFile(source);
+      typeof source === 'string' ? await loadFromUrl(source, name) : await loadFromFile(source);
     this.setModel(model);
     return model;
   }
@@ -141,6 +142,8 @@ export class App {
     this.ground.fit(this.sceneBox);
     this.layers.attach(model.root);
     this.state.layers = this.layers.initialState();
+    // Con terreno propio (TIN), el suelo auxiliar sobra y competiría con él en profundidad
+    this.state.ground.enabled = ![...this.layers.layers.values()].some((l) => l.kind === 'terrain');
     this.info.hide();
     this.applyAll();
     this.emit('model');
