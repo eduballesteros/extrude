@@ -56,6 +56,15 @@ fmt: fmt-pipeline fmt-viewer
 doctor:
     uv run extrude doctor
 
+# Regenera los DXF sintéticos de samples/
+[working-directory: 'pipeline']
+samples:
+    uv run python tests/sample_dxf.py ../samples
+
+# Inspecciona un DWG/DXF (ruta relativa a la raíz del repo)
+inspect file:
+    cd pipeline; uv run extrude inspect ../{{file}}
+
 # Arranca el visor en modo desarrollo
 [working-directory: 'viewer']
 dev:

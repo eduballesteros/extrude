@@ -39,6 +39,15 @@ Se revisarán cuando llegue el DWG real.
   conversor sin shell, con lista de argumentos y timeout (`CONVERSION_TIMEOUT_S`). El nombre
   original del archivo nunca llega a la línea de comandos.
 - **Errores accionables**: toda excepción de usuario hereda de `ExtrudeError(problem, fix)`.
+- **Lector DXF** (`dxf_reader.py`): `ezdxf.recover` para tolerar DXF con defectos (los
+  problemas reparados o no reparables pasan a avisos). Curvas vía `ezdxf.path` (resuelve OCS,
+  bulges, arcos, splines) aplanadas con `DEFAULT_FLATTEN_TOLERANCE_M`. INSERT/MINSERT vía
+  `virtual_entities()` de forma recursiva; la capa "0" dentro de un bloque hereda la capa del
+  INSERT (ezdxf no lo hace). Los ATTRIB se emiten como textos con `tag` y además se propagan a la
+  geometría del bloque (`Provenance.attributes`).
+- **Contabilidad**: cada entidad visitada se cuenta en `read`; si no se convierte acaba en
+  `unsupported` (ACIS), `skipped` (DIMENSION, VIEWPORT, …) o `failed` (excepción al leerla, con
+  aviso). Una entidad corrupta no aborta la lectura.
 - **Coordenadas**: el lector trabaja en WCS (float64). El recentrado y el paso Z-up → Y-up
   `(x, y, z)_dwg → (x, z, -y)_gltf` se hacen solo al exportar.
 

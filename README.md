@@ -3,7 +3,7 @@
 Convierte planos DWG/DXF urbanos (proyecto, manzana, barrio o ciudad) en modelos 3D glTF/GLB,
 y los previsualiza en un visor web con control de sol, luces y vistas exportables a Blender.
 
-> Estado: **Fase 0** (esqueleto, tooling y `extrude doctor`). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> Estado: **Fase 1** (lectura DXF e `extrude inspect`). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requisitos
 
@@ -40,6 +40,29 @@ just check     # lint + tests
 just doctor    # conversores DWG→DXF disponibles
 just dev       # visor en http://localhost:5173
 ```
+
+## Inspeccionar un plano antes de convertir
+
+`inspect` lee el dibujo sin generar 3D y muestra lo necesario para escribir el YAML de capas:
+unidades, bbox, entidades por tipo y por capa, ejemplos de textos (para el regex de plantas),
+etiquetas de atributos de bloque, entidades no soportadas y avisos.
+
+```sh
+cd pipeline
+uv run extrude inspect ../samples/block_2d.dxf
+uv run extrude inspect ../samples/nested_blocks.dxf --json
+uv run extrude inspect plano.dxf --units mm      # si $INSUNITS falta o es incorrecto
+```
+
+Muestras sintéticas en `samples/` (se regeneran con `just samples`):
+
+| Archivo | Contenido |
+|---|---|
+| `block_2d.dxf` | Manzana 2D: edificios con textos "nP", patio interior, borde curvo, vial y agua |
+| `block_2d_utm.dxf` | La misma manzana desplazada a coordenadas UTM (230000, 4140000) |
+| `nested_blocks.dxf` | Bloques anidados repetidos con rotación, escala, OCS invertido y atributo `PLANTAS` |
+| `faces_3d.dxf` | 3DFACE, MESH, polyface, SOLID 2D y sólidos ACIS (no soportados), en milímetros |
+| `dirty.dxf` | Polilínea casi cerrada, LINE/ARC sueltas, duplicados, pajarita, área nula, SPLINE, HATCH con hueco |
 
 ## Estructura
 
