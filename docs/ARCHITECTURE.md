@@ -56,6 +56,15 @@ Se revisarán cuando llegue el DWG real.
 - **Extrusión** (`extrusion.py`): earcut para tapas con huecos; paredes con vértices propios
   (sombreado plano). La orientación de cada triángulo se corrige por su área con signo, sin
   depender del orden de salida de earcut.
+- **Export GLB** (`gltf_export.py`): escrito a mano (cabecera + chunk JSON + chunk BIN) en lugar
+  de `pygltflib`: el formato es pequeño y así controlamos atributos personalizados (`_OBJECT_ID`)
+  y extensiones sin pelear con el modelo de datos de la librería. Una dependencia menos.
+- **Instancing** (`instancing.py`): el lector anota en cada entidad el INSERT de primer nivel
+  (handle, bloque, matriz). Una copia se instancia solo si, llevada a coordenadas del bloque, su
+  geometría coincide con el prototipo; si no, se fusiona. Así nunca se instancia algo que depende
+  del INSERT (alturas por atributo, contornos fusionados).
+- **Herramientas Node** (`tools/`): validador de Khronos y `gltf-transform` se ejecutan con `node`
+  directamente (nunca con `npx.cmd` ni shell), con rutas generadas por Extrude.
 - **Coordenadas**: el lector trabaja en WCS (float64). El recentrado y el paso Z-up → Y-up
   `(x, y, z)_dwg → (x, z, -y)_gltf` se hacen solo al exportar.
 
@@ -71,7 +80,6 @@ Se revisarán cuando llegue el DWG real.
 | mapbox-earcut | Triangulación de polígonos con huecos (rápida, wheels para todas las plataformas) |
 | scipy | `Delaunay` para TIN de terreno |
 | trimesh | Validación de mallas (`is_watertight`, volumen, normales) |
-| pygltflib | Escritura GLB con control total de `extras`, nodos e instancing |
 | pydantic | Esquema y validación de la configuración YAML |
 | pyyaml | Lectura del YAML |
 | typer | CLI |
@@ -83,6 +91,13 @@ Se revisarán cuando llegue el DWG real.
 |---|---|
 | three | Render WebGL, loaders glTF/HDR/EXR, controles |
 | *dev:* vite, typescript, vitest, eslint, typescript-eslint, prettier | Build, tipado, tests, lint/formato |
+
+### Herramientas (`tools/`, Node)
+
+| Paquete | Para qué |
+|---|---|
+| gltf-validator | Validación oficial de Khronos (tests y `just validate`) |
+| @gltf-transform/cli | Compresión Draco/Meshopt opcional (`--compress`) |
 
 `suncalc` y `lil-gui` se añadirán en la Fase 4, cuando se usen.
 TypeScript se fija en 6.0.x porque `typescript-eslint` 8.x aún no admite TS 7.

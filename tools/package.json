@@ -1,0 +1,13 @@
+{
+  "name": "extrude-tools",
+  "private": true,
+  "type": "module",
+  "description": "Herramientas Node del pipeline: validación glTF y compresión opcional",
+  "scripts": {
+    "validate": "node validate.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/cli": "4.5.1",
+    "gltf-validator": "2.0.0-dev.3.10"
+  }
+}

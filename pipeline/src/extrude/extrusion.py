@@ -44,7 +44,11 @@ def concat(meshes: list[MeshData]) -> MeshData:
 
 def triangle_areas(vertices: NDArray[np.float64], faces: NDArray[np.int64]) -> NDArray[np.float64]:
     a, b, c = (vertices[faces[:, i]] for i in range(3))
-    result: NDArray[np.float64] = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    u, v = b - a, c - a  # producto vectorial explícito: np.cross es lento en arrays pequeños
+    cx = u[:, 1] * v[:, 2] - u[:, 2] * v[:, 1]
+    cy = u[:, 2] * v[:, 0] - u[:, 0] * v[:, 2]
+    cz = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
+    result: NDArray[np.float64] = 0.5 * np.sqrt(cx * cx + cy * cy + cz * cz)
     return result
 
 
@@ -69,7 +73,7 @@ def extrude(polygon: Polygon, base: float, height: float, *, bottom: bool) -> Me
 
 def _ring(coords: object) -> NDArray[np.float64]:
     ring = np.asarray(coords, dtype=np.float64)[:, :2]
-    if len(ring) > 1 and np.allclose(ring[0], ring[-1]):
+    if len(ring) > 1 and (ring[0] == ring[-1]).all():  # shapely cierra los anillos exactamente
         ring = ring[:-1]
     keep = np.linalg.norm(ring - np.roll(ring, 1, axis=0), axis=1) > MIN_EDGE_LENGTH
     return ring[keep]

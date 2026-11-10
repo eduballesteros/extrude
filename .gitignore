@@ -20,3 +20,8 @@ out/
 Thumbs.db
 .idea/
 .vscode/
+
+# Visor: decodificadores copiados y modelos locales de prueba
+viewer/public/draco/
+viewer/public/models/
+

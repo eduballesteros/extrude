@@ -20,9 +20,11 @@ from extrude.model import (
     METERS_PER_UNIT,
     Feature,
     HatchFeature,
+    InsertRef,
     MeshFeature,
     PointFeature,
     PolylineFeature,
+    Provenance,
     ReadResult,
     TextFeature,
 )
@@ -38,6 +40,14 @@ class SceneObject:
     handles: tuple[str, ...]
     height: float | None = None
     height_origin: HeightOrigin | None = None
+    instance: InsertRef | None = None  # si todo el objeto sale de un único INSERT
+    hard_edges: bool = False  # malla 3D de origen: normales por cara (no suavizar)
+
+
+@dataclass(frozen=True, slots=True)
+class LineObject:
+    points: NDArray[np.float64]  # (N, 3) metros
+    closed: bool
 
 
 @dataclass
@@ -56,7 +66,7 @@ class LayerGeometry:
     layer: str
     rule: LayerRule
     objects: list[SceneObject] = field(default_factory=list)
-    lines: list[NDArray[np.float64]] = field(default_factory=list)
+    lines: list[LineObject] = field(default_factory=list)
     stats: LayerStats = field(default_factory=LayerStats)
 
 
@@ -122,13 +132,20 @@ def _build_layer(
     for mesh_feature in (f for f in features if isinstance(f, MeshFeature)):
         mesh, degenerate = mesh_from_feature(mesh_feature, scale)
         stats.degenerate_triangles += degenerate
-        _add(geometry, SceneObject(mesh, mesh_feature.source.dxftype, _handles([mesh_feature])))
+        obj = SceneObject(
+            mesh,
+            mesh_feature.source.dxftype,
+            _handles([mesh_feature]),
+            instance=mesh_feature.source.insert,
+            hard_edges=True,
+        )
+        _add(geometry, obj)
 
     if rule.kind in EXTRUDED_KINDS:
         _extrude_layer(geometry, polylines, hatches, config, texts, scale)
     elif rule.kind is Kind.LINE:
-        geometry.lines.extend(f.points * scale for f in polylines)
-        geometry.lines.extend(loop * scale for h in hatches for loop in h.loops)
+        geometry.lines.extend(LineObject(f.points * scale, f.closed) for f in polylines)
+        geometry.lines.extend(LineObject(loop * scale, True) for h in hatches for loop in h.loops)
     elif rule.kind is Kind.TERRAIN:
         _terrain_layer(geometry, features, read, config, scale)
 
@@ -166,7 +183,14 @@ def _extrude_layer(
         handles = tuple(s.handle for s in footprint.sources if s.handle)
         _add(
             geometry,
-            SceneObject(mesh, source_type, handles, resolved.height, resolved.origin),
+            SceneObject(
+                mesh,
+                source_type,
+                handles,
+                resolved.height,
+                resolved.origin,
+                instance=_common_insert(footprint.sources),
+            ),
         )
 
 
@@ -190,6 +214,11 @@ def _terrain_layer(
 def _add(geometry: LayerGeometry, obj: SceneObject) -> None:
     geometry.objects.append(obj)
     geometry.stats.triangles += obj.mesh.triangle_count
+
+
+def _common_insert(sources: Sequence[Provenance]) -> InsertRef | None:
+    inserts = {s.insert for s in sources}
+    return inserts.pop() if len(inserts) == 1 else None
 
 
 def _handles(features: Sequence[Feature]) -> tuple[str, ...]:

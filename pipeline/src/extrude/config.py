@@ -26,6 +26,7 @@ from extrude.model import LengthUnit
 
 DEFAULT_FLOOR_HEIGHT_M = 3.0
 DEFAULT_TOLERANCE_M = 0.01
+DEFAULT_INSTANCING_MIN = 10
 HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -144,6 +145,8 @@ class Config(_Strict):
     units: Literal["auto"] | LengthUnit = "auto"
     recenter: bool = True
     tolerance: Positive = DEFAULT_TOLERANCE_M
+    crs: str | None = None  # p. ej. "EPSG:25830"; solo se copia a scene.extras
+    instancing_min: Annotated[int, Field(ge=0)] = DEFAULT_INSTANCING_MIN  # 0 = desactivado
     layers: list[LayerRule] = Field(default_factory=list)
 
     def rule_for(self, layer: str) -> LayerRule | None:

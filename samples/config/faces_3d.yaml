@@ -1,0 +1,15 @@
+# samples/faces_3d.dxf: geometría 3D existente (en milímetros)
+units: auto
+layers:
+  - match: "CUBO"
+    kind: building
+    material: { color: "#c8b89a" }
+  - match: "MALLA"
+    kind: building
+    material: { color: "#9aa8c8" }
+  - match: "POLYFACE"
+    kind: building
+  - match: "SOLID2D"
+    kind: road
+  - match: "*"
+    kind: ignore

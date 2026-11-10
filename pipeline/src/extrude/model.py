@@ -43,6 +43,15 @@ INSUNITS_CODES: dict[int, LengthUnit] = {
 
 
 @dataclass(frozen=True, slots=True)
+class InsertRef:
+    """INSERT de primer nivel: bloque y matriz bloque→WCS (fila mayor, unidades del dibujo)."""
+
+    handle: str
+    block: str
+    matrix: tuple[float, ...]  # 16 valores, convención ezdxf (fila = vector, traslación en 12..14)
+
+
+@dataclass(frozen=True, slots=True)
 class Provenance:
     """De dónde sale una entidad: tipo DXF, handle y cadena de bloques que la contienen."""
 
@@ -50,6 +59,7 @@ class Provenance:
     handle: str | None
     block_path: tuple[str, ...] = ()
     attributes: tuple[tuple[str, str], ...] = ()  # (tag, valor) de los INSERT padres
+    insert: InsertRef | None = None
 
 
 @dataclass(frozen=True, slots=True)

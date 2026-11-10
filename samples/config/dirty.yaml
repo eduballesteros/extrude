@@ -1,0 +1,14 @@
+# samples/dirty.dxf: geometría a reparar
+units: auto
+layers:
+  - match: "EDIFICIOS"
+    kind: building
+    default_height: 9.0
+  - match: "ZONAS_VERDES"
+    kind: vegetation
+  - match: "AGUA"
+    kind: water
+    height: 0.02
+    material: { color: "#4a7fa8", roughness: 0.2, opacity: 0.8 }
+  - match: "*"
+    kind: ignore

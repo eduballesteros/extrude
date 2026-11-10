@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import ezdxf
+import numpy as np
 from ezdxf import const, units
 from ezdxf.acis import api as acis
 from ezdxf.document import Drawing
@@ -243,6 +244,67 @@ def make_dirty() -> Drawing:
     return doc
 
 
+CITY_BLOCK_M = 100.0  # manzana de 100 × 100 m con calle de 20 m alrededor
+CITY_STREET_M = 20.0
+CITY_BUILDINGS_PER_BLOCK = 16  # 4 × 4 parcelas
+CITY_TREES_PER_BLOCK = 4
+
+
+def make_city(buildings: int = 50_000, seed: int = 7, offset: Point2 = UTM_OFFSET) -> Drawing:
+    """Ciudad sintética en UTM: manzanas de 4×4 edificios con rótulo "nP", calles y árboles."""
+    import random
+
+    rng = random.Random(seed)
+    doc = _new_doc()
+    for name in ("EDIFICIOS", "EDIFICIOS_TEXTO", "VIALES", "VEGETACION"):
+        doc.layers.add(name)
+    tree = doc.blocks.new("ARBOL")
+    tree.add_circle((0, 0), TREE_RADIUS)
+    msp = doc.modelspace()
+
+    blocks = -(-buildings // CITY_BUILDINGS_PER_BLOCK)
+    side = int(np.ceil(np.sqrt(blocks)))
+    pitch = CITY_BLOCK_M + CITY_STREET_M
+    plot = CITY_BLOCK_M / 4
+    made = 0
+    for b in range(blocks):
+        bx = offset[0] + (b % side) * pitch
+        by = offset[1] + (b // side) * pitch
+        for k in range(CITY_BUILDINGS_PER_BLOCK):
+            if made == buildings:
+                break
+            px, py = bx + (k % 4) * plot, by + (k // 4) * plot
+            w, d = rng.uniform(12, plot - 2), rng.uniform(12, plot - 2)
+            x0, y0 = px + (plot - w) / 2, py + (plot - d) / 2
+            msp.add_lwpolyline(
+                [(x0, y0), (x0 + w, y0), (x0 + w, y0 + d), (x0, y0 + d)],
+                close=True,
+                dxfattribs={"layer": "EDIFICIOS"},
+            )
+            msp.add_text(
+                f"{rng.randint(1, 12)}P", height=1.0, dxfattribs={"layer": "EDIFICIOS_TEXTO"}
+            ).set_placement((x0 + w / 2, y0 + d / 2), align=TextEntityAlignment.MIDDLE_CENTER)
+            made += 1
+        for t in range(CITY_TREES_PER_BLOCK):
+            msp.add_blockref(
+                "ARBOL",
+                (bx - CITY_STREET_M / 2, by + t * CITY_BLOCK_M / CITY_TREES_PER_BLOCK),
+                dxfattribs={"layer": "VEGETACION"},
+            )
+    width = side * pitch
+    msp.add_lwpolyline(
+        [
+            (offset[0] - CITY_STREET_M, offset[1] - CITY_STREET_M),
+            (offset[0] + width, offset[1] - CITY_STREET_M),
+            (offset[0] + width, offset[1] + width),
+            (offset[0] - CITY_STREET_M, offset[1] + width),
+        ],
+        close=True,
+        dxfattribs={"layer": "VIALES"},
+    )
+    return doc
+
+
 SAMPLES: dict[str, Callable[[], Drawing]] = {
     "block_2d.dxf": make_block_2d,
     "block_2d_utm.dxf": make_block_2d_utm,
@@ -264,5 +326,10 @@ def write_samples(out_dir: Path) -> list[Path]:
 
 if __name__ == "__main__":
     target = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("../samples")
-    for p in write_samples(target):
-        print(p)
+    if len(sys.argv) > 2:  # python tests/sample_dxf.py <dir> <n>: ciudad de n edificios
+        path = target / f"city_{sys.argv[2]}.dxf"
+        make_city(int(sys.argv[2])).saveas(path)
+        print(path)
+    else:
+        for p in write_samples(target):
+            print(p)

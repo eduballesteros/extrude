@@ -10,7 +10,6 @@ dependencies = [
     "mapbox-earcut>=1.0",
     "scipy>=1.13",
     "trimesh>=4.4",
-    "pygltflib>=1.16",
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "typer>=0.12",
@@ -44,7 +43,7 @@ ignore = ["S603"]  # subprocess sin shell: las rutas se sanean antes (ver conver
 allowed-confusables = ["×"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+"tests/**" = ["S101", "S311"]  # assert y aleatorios no criptográficos en fixtures
 
 [tool.mypy]
 python_version = "3.12"
@@ -53,7 +52,7 @@ mypy_path = "src"
 packages = ["extrude"]
 
 [[tool.mypy.overrides]]
-module = ["shapely.*", "mapbox_earcut.*", "scipy.*", "trimesh.*", "pygltflib.*"]
+module = ["shapely.*", "mapbox_earcut.*", "scipy.*", "trimesh.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

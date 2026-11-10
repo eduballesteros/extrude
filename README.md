@@ -3,7 +3,7 @@
 Convierte planos DWG/DXF urbanos (proyecto, manzana, barrio o ciudad) en modelos 3D glTF/GLB,
 y los previsualiza en un visor web con control de sol, luces y vistas exportables a Blender.
 
-> Estado: **Fase 2** (topología, extrusión y configuración por proyecto; aún sin export GLB). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> Estado: **Fase 3** (export GLB recentrado, instancing, teselas, compresión e informe; visor básico). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requisitos
 
@@ -13,6 +13,9 @@ y los previsualiza en un visor web con control de sol, luces y vistas exportable
 | uv | ≥ 0.4 | `pip install uv` o <https://docs.astral.sh/uv/> |
 | Node.js | ≥ 22.12 | <https://nodejs.org> |
 | just | ≥ 1.38 | `uv tool install rust-just`, `winget install Casey.Just`, `brew install just` |
+
+Las herramientas Node de `tools/` (validador glTF y `gltf-transform` para `--compress`) se
+instalan con `just setup-tools`.
 
 ### Conversor DWG → DXF (opcional, uno de estos)
 
@@ -77,11 +80,52 @@ uv run extrude init-config ../samples/block_2d.dxf -o ../proyecto.yaml
 
 Referencia completa: [docs/CONFIG.md](docs/CONFIG.md). Ejemplo comentado: `pipeline/config/example.yaml`.
 
+## Convertir
+
+```sh
+cd pipeline
+uv run extrude convert plano.dwg -c proyecto.yaml -o ../out/proyecto
+uv run extrude convert plano.dxf -c proyecto.yaml -o ../out/ciudad --tiles 500 --compress meshopt
+```
+
+Genera `model.glb` (o `tiles/*.glb` + `manifest.json`), `report.md` y `report.json`. El informe
+lista todo lo leído, convertido, ignorado, reparado o descartado, con su capa. Formato del GLB:
+[docs/EXPORT_FORMATS.md](docs/EXPORT_FORMATS.md).
+
+Con las muestras: `just convert-samples` y `just validate out/block_2d/model.glb`.
+
+## Visor
+
+```sh
+just dev                # http://localhost:5173
+```
+
+Arrastra un `.glb` a la ventana, usa el selector o abre `http://localhost:5173/?model=/models/x.glb`,
+con el archivo copiado en `viewer/public/models/`. Abajo a la izquierda se ven los FPS, los
+triángulos y los draw calls.
+
+## Rendimiento medido
+
+Ciudad sintética (`just bench`): 50 000 edificios con rótulo de plantas y 12 500 árboles, en UTM.
+Medido en Windows 11 con Python 3.13 y una RTX 3050 Ti Laptop.
+
+| Fase | Tiempo |
+|---|---:|
+| Lectura DXF (27 MB) | 26 s |
+| Topología + alturas + extrusión | 40 s |
+| Instancing | 5 s |
+| Escritura GLB | 9 s |
+| **Total** (`extrude convert`) | **83 s** |
+
+Resultado: 1 675 010 triángulos, 3 draw calls (los árboles instanciados) y un GLB de 34 MB.
+En el visor, a 2133×950 y sin sombras, se mantiene en **60 FPS** (límite de vsync) en Chrome.
+
 ## Estructura
 
 ```
 pipeline/   Python: CLI `extrude`, conversión, lectura DXF, extrusión, export GLB
 viewer/     TypeScript + Three.js: visor, iluminación, vistas y exportación
-samples/    DXF sintéticos y GLB de ejemplo
+samples/    DXF sintéticos, sus configs (samples/config) y GLB de ejemplo (samples/glb)
+tools/      Node: gltf-validator y gltf-transform (validación y compresión)
 docs/       Arquitectura, configuración y formatos de exportación
 ```

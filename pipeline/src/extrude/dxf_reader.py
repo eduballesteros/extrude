@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -36,6 +36,7 @@ from extrude.model import (
     BBox,
     Feature,
     HatchFeature,
+    InsertRef,
     LengthUnit,
     MeshFeature,
     PointFeature,
@@ -74,6 +75,7 @@ class _Context:
     parent_layer: str | None = None
     block_path: tuple[str, ...] = ()
     attributes: tuple[tuple[str, str], ...] = ()
+    insert: InsertRef | None = None  # INSERT de primer nivel (para instancing)
 
 
 def read_dxf(
@@ -182,6 +184,7 @@ class _Walker:
             handle=entity.dxf.get("handle"),
             block_path=ctx.block_path,
             attributes=ctx.attributes,
+            insert=ctx.insert,
         )
 
     def _emit(self, feature: Feature) -> None:
@@ -225,6 +228,7 @@ class _Walker:
             parent_layer=layer,
             block_path=(*ctx.block_path, insert.dxf.name),
             attributes=ctx.attributes + own_attribs,
+            insert=ctx.insert,
         )
         for attrib in insert.attribs:
             attrib_layer = self._layer(attrib, _Context(parent_layer=layer))
@@ -238,9 +242,14 @@ class _Walker:
                     tag=attrib.dxf.tag,
                 )
             )
-        refs = insert.multi_insert() if insert.mcount > 1 else [insert]
-        for ref in refs:
-            self.walk(ref.virtual_entities(), child)
+        refs = list(insert.multi_insert()) if insert.mcount > 1 else [insert]
+        for index, ref in enumerate(refs):
+            ref_ctx = child
+            if ctx.insert is None:  # primer nivel: cada copia (también de MINSERT) es una instancia
+                handle = f"{insert.dxf.get('handle', '?')}#{index}"
+                matrix = tuple(float(v) for v in ref.matrix44())
+                ref_ctx = replace(child, insert=InsertRef(handle, insert.dxf.name, matrix))
+            self.walk(ref.virtual_entities(), ref_ctx)
 
     def _curve(self, entity: DXFGraphic, layer: str, ctx: _Context) -> None:
         curve = ezpath.make_path(entity)

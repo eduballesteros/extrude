@@ -11,12 +11,16 @@ from typing import Annotated
 
 import typer
 
+from extrude.config import load_config
+from extrude.convert import ConvertOptions
+from extrude.convert import convert as run_convert
 from extrude.converters import MANUAL_EXPORT_HINT, converter_statuses, ensure_dxf
 from extrude.dxf_reader import read_dxf
 from extrude.errors import ExtrudeError
 from extrude.init_config import draft_config
 from extrude.inspection import format_text, summarize
 from extrude.model import LengthUnit
+from extrude.node_tools import Compression
 
 app = typer.Typer(
     help="Extrude: convierte DWG/DXF urbanos en modelos 3D glTF.",
@@ -73,6 +77,38 @@ def inspect(
             typer.echo(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2))
         else:
             typer.echo(format_text(summary))
+
+
+@app.command()
+def convert(
+    source: Annotated[Path, typer.Argument(help="Archivo .dwg o .dxf")],
+    config: Annotated[Path, typer.Option("-c", "--config", help="YAML del proyecto")],
+    out: Annotated[Path, typer.Option("-o", "--out", help="Carpeta de salida")] = Path("out"),
+    tiles: Annotated[
+        float | None, typer.Option(help="Tamaño de tesela en metros (un GLB por tesela)")
+    ] = None,
+    compress: Annotated[
+        Compression | None, typer.Option(help="Compresión final con gltf-transform")
+    ] = None,
+    units: Annotated[
+        LengthUnit | None, typer.Option(help="Fuerza las unidades (prevalece sobre el YAML)")
+    ] = None,
+) -> None:
+    """Convierte el dibujo a GLB (metros, Y-up, recentrado) y escribe report.md/json."""
+    with _user_errors():
+        if tiles is not None and tiles <= 0:
+            raise ExtrudeError("--tiles debe ser > 0.", "Ejemplo: --tiles 500 (metros).")
+        options = ConvertOptions(load_config(config), out, tiles, compress, units)
+        result = run_convert(source, options)
+    report = result.report
+    output = report["output"]
+    typer.echo(
+        f"OK: {len(output['files'])} GLB · {output['triangles']:,} triángulos · "
+        f"{output['total_size_bytes'] / 1_048_576:.2f} MB → {out}"
+    )
+    for warning in report["warnings"]:
+        typer.echo(f"  aviso: {warning}")
+    typer.echo(f"Informe: {out / 'report.md'}")
 
 
 @app.command("init-config")

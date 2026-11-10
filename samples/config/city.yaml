@@ -1,0 +1,16 @@
+# Ciudad sintética (tests/sample_dxf.py make_city) para medir rendimiento
+units: auto
+layers:
+  - match: "EDIFICIOS"
+    kind: building
+    height_from: text
+    text_layers: ["EDIFICIOS_TEXTO"]
+    default_height: 9.0
+  - match: "VIALES"
+    kind: road
+    height: 0.05
+  - match: "VEGETACION"
+    kind: vegetation
+    height: 5.0
+  - match: "*"
+    kind: ignore

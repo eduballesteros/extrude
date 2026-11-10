@@ -1,0 +1,16 @@
+# samples/nested_blocks.dxf: árboles repetidos (instancing) y edificios con atributo PLANTAS
+units: auto
+layers:
+  - match: "EDIFICIOS"
+    kind: building
+    height_from: attribute
+    attribute: PLANTAS
+    default_height: 9.0
+  - match: "VEGETACION"
+    kind: vegetation
+    height: 4.0
+    detect_holes: false     # el tronco no es un patio de la copa
+  - match: "MOBILIARIO"
+    kind: line
+  - match: "*"
+    kind: ignore

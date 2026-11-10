@@ -1,0 +1,31 @@
+# Configuración de ejemplo para samples/block_2d.dxf.
+# Referencia completa de opciones: docs/CONFIG.md
+# Para un plano nuevo, genera un borrador con:  extrude init-config plano.dxf -o proyecto.yaml
+
+units: auto            # auto | mm | cm | m | km | in | ft
+recenter: true
+tolerance: 0.01        # metros: cierre de lazos, ajuste de extremos, duplicados
+
+layers:                # la primera regla cuyo patrón encaje gana
+  - match: "EDIFIC*"
+    kind: building
+    height_from: text              # attribute | text | elevation
+    text_regex: '(\d+)\s*P'        # el grupo 1 es el número (admite romanos: IV)
+    text_layers: ["EDIFICIOS_TEXTO"]
+    value_means: floors            # floors | meters
+    floor_height: 3.0
+    default_height: 9.0            # si no hay texto dentro del polígono
+    material: { color: "#d9d4c7", roughness: 0.9 }
+
+  - match: "VIAL*"
+    kind: road
+    height: 0.05
+    material: { color: "#555555", roughness: 1.0 }
+
+  - match: "AGUA*"
+    kind: water
+    height: 0.02
+    material: { color: "#4a7fa8", roughness: 0.2, metalness: 0.0 }
+
+  - match: "*"
+    kind: ignore
