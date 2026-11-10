@@ -17,8 +17,122 @@
           sans-serif;
       }
       #app {
+        position: relative;
         width: 100%;
         height: 100%;
+      }
+      .camera-frame {
+        position: absolute;
+        pointer-events: none;
+        outline: 1px solid rgb(255 255 255 / 80%);
+        box-shadow: 0 0 0 100vmax rgb(0 0 0 / 30%);
+      }
+      .views-panel {
+        position: fixed;
+        top: 48px;
+        left: 8px;
+        width: 300px;
+        max-height: calc(100vh - 100px);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        color: #eee;
+        background: rgb(30 31 34 / 92%);
+        border-radius: 6px;
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      .views-panel.collapsed > :not(header) {
+        display: none;
+      }
+      .views-panel header {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .views-panel h2 {
+        margin: 0 auto 0 0;
+        font-size: 14px;
+      }
+      .views-panel h3 {
+        width: 100%;
+        margin: 4px 0 0;
+        font-size: 12px;
+        opacity: 0.7;
+      }
+      .views-panel button {
+        background: #3a3c42;
+        color: #eee;
+        border: 1px solid #4a4c52;
+        border-radius: 4px;
+        padding: 2px 6px;
+        cursor: pointer;
+      }
+      .views-panel button:hover {
+        background: #4a4c52;
+      }
+      .render-settings {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+      }
+      .render-settings select {
+        width: 100%;
+      }
+      .render-settings input[type='number'] {
+        width: 64px;
+      }
+      .views-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .views-list li {
+        display: flex;
+        gap: 6px;
+        padding: 4px;
+        border-radius: 4px;
+        background: #2a2b30;
+      }
+      .views-list li.active {
+        outline: 1px solid #6fa8dc;
+      }
+      .views-list li.empty {
+        opacity: 0.7;
+        font-size: 12px;
+      }
+      .views-list img {
+        width: 96px;
+        height: 54px;
+        object-fit: cover;
+        background: #111;
+        cursor: pointer;
+        flex: none;
+      }
+      .views-list input {
+        width: 100%;
+        box-sizing: border-box;
+        background: transparent;
+        color: inherit;
+        border: 1px solid transparent;
+      }
+      .views-list input:focus {
+        border-color: #6fa8dc;
+      }
+      .views-list .actions {
+        display: flex;
+        gap: 2px;
+        margin-top: 2px;
+      }
+      .views-panel footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
       }
       #app.dragging {
         outline: 4px dashed #4a7fa8;

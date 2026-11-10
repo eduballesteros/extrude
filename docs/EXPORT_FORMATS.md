@@ -105,13 +105,121 @@ posiciones y para `_OBJECT_ID`:
 `just validate out/model.glb` (validador oficial de Khronos 2.0.0-dev.3.10). Todas las muestras,
 teselas y versiones comprimidas validan **sin errores ni avisos** (test automático).
 
+## Vistas (`SceneView`)
+
+Una vista es una instantánea del estado del visor (`viewer/src/views/viewState.ts`):
+
+| Campo | Contenido |
+|---|---|
+| `camera` | `type` (perspective/orthographic), `position`, `target`, `up` (coordenadas de la escena), `fovDeg`, `orthoSize`, `near`, `far` |
+| `render` | `width`, `height`, `aspect` ("16:9") |
+| `sun` | `mode`, `isoDate` (hora local con desfase), `lat`, `lon`, `azimuthDeg` (desde el norte, horario), `elevationDeg`, `northRotationDeg`, `intensity`, `colorTempK` |
+| `ambient` | `intensity`, `background` (sky/hdri/color), `hdri` (nombre de archivo), `hdriRotationDeg`, `hdriIntensity`, colores |
+| `shadows`, `ground`, `tonemapping` | ajustes de sombras, suelo y tone mapping (`type`, `exposure`) |
+| `lights` | `type` (point/spot/area), `position`, `target`, `color`, `intensity`, `distance`, `angleDeg`, `width`, `height` |
+| `layers` | `{capa: {visible, colorOverride?}}` |
+| `thumbnailDataUrl` | miniatura JPEG (solo se aceptan URLs `data:image/…` al importar) |
+
+**`fovDeg` y `orthoSize` son los del render final**: lo que encierra el "marco de cámara" a la
+resolución elegida. Al restaurar, el visor recalcula su propio FOV para que el marco muestre
+exactamente ese encuadre. El PNG, el GLB y Blender usan ese mismo encuadre.
+
+Las vistas se guardan por modelo (nombre del GLB) en IndexedDB del navegador. Para conservarlas
+o compartirlas, exporta `views.json`.
+
+## `views.json`
+
+```json
+{
+  "schemaVersion": 1,
+  "generator": "extrude-viewer 0.1.0",
+  "coordinateSystem": {
+    "units": "m", "up": "Y",
+    "axisTransform": "(x, y, z)_dwg -> (x, z, -y)_gltf",
+    "originOffset": [x, y, z], "crs": "EPSG:25830" | null
+  },
+  "model": { "file": "model.glb" },
+  "views": [ { ...SceneView, "cameraWorld": { "position": [..], "target": [..] } } ]
+}
+```
+
+- Las coordenadas de cada vista están en el **sistema de la escena exportada** (Y-up, recentrado).
+- `cameraWorld` repite cámara y objetivo en **coordenadas reales del DWG** (Z-up, p. ej. UTM):
+  `x = x + o[0]`, `y = -z + o[1]`, `z = y + o[2]`.
+- Al importar se valida la estructura. Los errores dicen qué campo falla. Las secciones que
+  falten se rellenan con valores por defecto. Si el `originOffset` no coincide con el del modelo
+  cargado, se avisa.
+
+## `blender_setup.py`
+
+Script autocontenido (los datos de las vistas van en Base64 dentro del propio script).
+
+```sh
+# En Blender: Scripting → Abrir → Run Script (con el GLB en la misma carpeta)
+# O sin interfaz:
+blender -b -P blender_setup.py -- [--glb modelo.glb] [--render-all renders/] [--percentage 50] [--report informe.json]
+```
+
+Qué hace:
+1. Si la escena es la de fábrica (Cube, Light, Camera y nada más), la vacía. Si no, no toca nada.
+2. Importa el GLB con `bpy.ops.import_scene.gltf`.
+3. Por cada vista crea, en la colección `Extrude vistas/N. nombre`:
+   - una cámara con la lente y el modo ortográfico de la vista;
+   - una luz Sun;
+   - sus luces puntuales, focos y de área.
+4. `apply_view("nombre")` activa la cámara, ajusta la resolución, enciende solo las luces de esa
+   vista, oculta (`hide_render`) las capas ocultas, y aplica el mundo y la gestión de color.
+5. `render_all("//renders")` renderiza todas las vistas con el motor activo de la escena.
+
+Conversiones (calculadas en `viewer/src/export/blenderScript.ts` y cubiertas por tests):
+
+| Concepto | Visor (Three.js) | Blender |
+|---|---|---|
+| Ejes | escena Y-up | `(x, y, z) → (x, −z, y)` (lo mismo que hace el importador glTF) |
+| Orientación de la cámara | `lookAt` de Three.js | el cuaternión se calcula en el visor y se pasa tal cual, así el giro coincide también en plantas |
+| FOV | vertical, en grados | `sensor_fit = VERTICAL`, sensor de 24 mm, `lens = 12 / tan(fov/2)` |
+| Ortográfica | `orthoSize` (media altura) | `ortho_scale = 2 × orthoSize` |
+| Sol | intensidad × factor de crepúsculo | Strength [W/m²] = mismo número; ángulo 0,53° |
+| Puntual / foco | candelas | W = cd × 4π; `spot_size` = 2 × ángulo, `spot_blend` = 0,3 |
+| Área | luminancia (nits) | W = nits × ancho × alto × π |
+| Cielo procedural | entorno PMREM × 0,5 | mundo de color cielo, Strength = luz ambiente × 0,5 (**aproximado**) |
+| HDRI | archivo cargado en el visor | Environment Texture con el archivo de la carpeta del script; rotación en Z (**sentido no verificado visualmente**) |
+| Tone mapping | AgX / Neutral / ACES / ninguno | AgX / Khronos PBR Neutral / Filmic (aproximación a ACES) / Standard; exposición = log₂(exposure) |
+
+Las potencias son **aproximadas**: conservan las proporciones entre luces del visor, con una
+escala global elegida para que el sol del visor (intensidad 3) dé Strength 3. No es una
+conversión física absoluta.
+
+## GLB con cámaras y luces
+
+Se exporta desde el panel de vistas ("GLB + cámaras y luces") y se llama `<modelo>_vistas.glb`.
+
+- Es el GLB original con **solo el JSON modificado**: el bloque binario no se toca, así que se
+  conservan la compresión, los `extras` y `_OBJECT_ID`.
+- **Cámaras:** una por vista (`perspective` con `yfov` y `aspectRatio`, u `orthographic`).
+- **Luces:** las de la vista activa (o la primera) con `KHR_lights_punctual`: el sol como
+  `directional`, más `point` y `spot`.
+  - **Las luces de área no existen en `KHR_lights_punctual`:** se omiten y el visor lo avisa.
+  - Las intensidades están en las unidades físicas de glTF (lux y candelas), las mismas que usa
+    Three.js.
+- Todo cuelga de un nodo "Extrude: vistas y luces" en la escena. Validado con gltf-validator:
+  0 errores y 0 avisos.
+
+## PNG
+
+Render de la vista actual a la resolución del panel (p. ej. 3840×2160), con el encuadre exacto
+del marco de cámara. Se redimensiona el lienzo WebGL solo durante ese render. El límite lo pone
+la GPU (`MAX_VIEWPORT_DIMS`): si se supera, el mensaje indica el máximo.
+
 ## Compatibilidad con herramientas externas
 
-| Herramienta | GLB básico | `EXT_mesh_gpu_instancing` | Draco / Meshopt | `extras` |
-|---|---|---|---|---|
-| Visor Extrude (Three.js 0.187) | verificado | verificado | verificado | verificado |
-| Blender | no verificado (se verificará en Fase 5) | no verificado | no verificado | no verificado |
-| Twinmotion, D5, Unreal, Enscape | no verificado | no verificado | no verificado | no verificado |
+Probado en esta máquina con Blender 5.3.0 (Windows):
 
-No se afirma compatibilidad con ninguna herramienta sin haberla probado. Si una herramienta no
-admite instancing o compresión, convierte con `instancing_min: 0` y sin `--compress`.
+| Herramienta | GLB del pipeline | Instancing | Draco | Meshopt | `extras` | GLB con cámaras y luces | `blender_setup.py` |
+|---|---|---|---|---|---|---|---|
+| Visor Extrude (Three.js 0.187) | verificado | verificado | verificado | verificado | verificado | — | — |
+| Blender 5.3.0 | verificado | verificado (cada copia se expande a un objeto) | verificado | verificado | verificado (propiedades personalizadas) | verificado: 2 cámaras y el sol | verificado en modo sin ventana: cámaras, soles, luces, visibilidad por vista y render de todas las vistas |
+| Twinmotion, D5, Unreal, Enscape | no verificado | no verificado | no verificado | no verificado | no verificado | no verificado | — |
+
+No se afirma compatibilidad con herramientas que no se han probado. Si una herramienta no admite
+instancing o compresión, convierte con `instancing_min: 0` y sin `--compress`.

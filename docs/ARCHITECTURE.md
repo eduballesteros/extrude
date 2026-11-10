@@ -78,6 +78,15 @@ Se revisarán cuando llegue el DWG real.
 - **Entorno**: el cielo procedural genera el mapa de entorno (PMREM, regenerado como mucho cada
   200 ms al mover el sol) escalado ×0,5. La luz hemisférica solo se usa con fondo de color liso,
   para no sumar dos veces la luz ambiente.
+- **Vistas** (`viewer/src/views`): una vista guarda el FOV y el `orthoSize` del **render final**
+  (lo que encierra el marco de cámara), así que el PNG, el GLB y Blender coinciden. El visor adapta
+  su FOV al restaurar. Persistencia en IndexedDB por modelo; `views.json` validado al importar
+  (entrada no confiable: solo miniaturas `data:image/`).
+- **Exportaciones** (`viewer/src/export`): el GLB con cámaras y luces se obtiene parcheando el JSON
+  del GLB original, con el bloque binario intacto. `blender_setup.py` lleva los datos en Base64 (un
+  nombre con `'''` no puede inyectar código) y las orientaciones ya calculadas con el `lookAt`
+  de Three.js, para que el giro de la cámara coincida con el visor. Acepta `--report`, que usa el test
+  de integración que ejecuta Blender en modo sin ventana.
 - **Coordenadas**: el lector trabaja en WCS (float64). El recentrado y el paso Z-up → Y-up
   `(x, y, z)_dwg → (x, z, -y)_gltf` se hacen solo al exportar.
 
@@ -117,5 +126,6 @@ Se revisarán cuando llegue el DWG real.
 | Paquete | Para qué |
 |---|---|
 | suncalc 1.9.0 | Posición solar (la versión clásica, la que encaja con `@types/suncalc` 1.9.2) |
+| @types/node (dev) | Tipos para los tests de integración (Blender, py_compile, gltf-validator) |
 | lil-gui 0.21 | Panel de control ligero; pone los nombres con `textContent`, así que los nombres de capa del DWG no son un riesgo de inyección |
 TypeScript se fija en 6.0.x porque `typescript-eslint` 8.x aún no admite TS 7.

@@ -35,6 +35,16 @@ export function sunDirection(angles: SunAngles, northRotationDeg = 0): Vector3 {
   ).normalize();
 }
 
+/** El sol se apaga gradualmente entre estas elevaciones (crepúsculo). */
+export const TWILIGHT_DEG: [number, number] = [-2, 4];
+
+/** Factor 0..1 de luz solar según la elevación (suave en el crepúsculo). */
+export function daylightFactor(elevationDeg: number): number {
+  const [a, b] = TWILIGHT_DEG;
+  const t = Math.min(Math.max((elevationDeg - a) / (b - a), 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
 /** "2024-06-21T10:30:00+02:00" → hora local decimal (10.5), con el desfase del propio texto. */
 export function localHours(isoDate: string): number {
   const match = /T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(isoDate);

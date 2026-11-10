@@ -14,4 +14,11 @@ export default tseslint.config(
     },
   },
   { files: ['**/*.js', '**/*.mjs'], ...tseslint.configs.disableTypeChecked },
+  {
+    // Scripts de Node (decodificadores, favicons…)
+    files: ['scripts/**'],
+    languageOptions: {
+      globals: { Buffer: 'readonly', console: 'readonly', process: 'readonly', URL: 'readonly' },
+    },
+  },
 );

@@ -29,6 +29,7 @@ export class ControlPanel {
   private layersFolder: GUI;
   private lightsFolder: GUI;
   private readonly newLight = { type: 'point' as LightType };
+  private lightIds = '';
 
   constructor(private readonly app: App) {
     this.time = splitIso(app.state.sun.isoDate);
@@ -277,7 +278,11 @@ export class ControlPanel {
 
   private refresh(): void {
     Object.assign(this.time, splitIso(this.app.state.sun.isoDate));
-    if (this.lightsFolder.folders.length !== this.app.state.lights.length) this.rebuildLights();
+    const ids = this.app.state.lights.map((l) => l.id).join();
+    if (ids !== this.lightIds) {
+      this.lightIds = ids;
+      this.rebuildLights();
+    }
     this.gui.controllersRecursive().forEach((c) => c.updateDisplay());
   }
 }

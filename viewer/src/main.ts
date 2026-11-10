@@ -1,7 +1,10 @@
 import { App } from './app';
 import type { LoadedModel } from './scene/loader';
 import { bindFileInputs } from './ui/dropzone';
+import { FrameOverlay } from './ui/frameOverlay';
 import { ControlPanel } from './ui/panel';
+import { ViewsPanel } from './ui/viewsPanel';
+import { ViewManager } from './views/viewManager';
 
 function required<T extends HTMLElement>(selector: string): T {
   const el = document.querySelector<T>(selector);
@@ -15,10 +18,14 @@ const fileInput = required<HTMLInputElement>('#file');
 
 const app = new App(container);
 new ControlPanel(app);
+const views = new ViewManager(app);
+new ViewsPanel(app, views, new FrameOverlay(container));
 
 const params = new URLSearchParams(window.location.search);
 // ?debug expone la app para inspeccionarla desde la consola o automatizar pruebas
-if (params.has('debug')) (window as unknown as { __extrude: App }).__extrude = app;
+if (params.has('debug')) {
+  Object.assign(window as unknown as Record<string, unknown>, { __extrude: app, __views: views });
+}
 
 function describe(model: LoadedModel): string {
   const offset = model.extras?.origin_offset;

@@ -22,17 +22,15 @@ import {
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import type { AmbientState, ShadowState, SunState, ToneMappingState } from '../state';
 import { fitShadow, shouldFitToView, viewBox } from './shadows';
-import { kelvinToRgb, sunAngles, sunDirection } from './sun';
+import { daylightFactor, kelvinToRgb, sunAngles, sunDirection } from './sun';
 
 const DEG = Math.PI / 180;
-/** El sol se apaga gradualmente entre estas elevaciones (crepúsculo). */
-const TWILIGHT_DEG: [number, number] = [-2, 4];
 const SKY_SCALE = 1e5;
 /** Regenerar el entorno del cielo cuesta unos ms: como mucho cada este intervalo. */
 const SKY_ENV_INTERVAL_MS = 200;
 /**
  * El entorno generado con el cielo procedural es muy intenso (radiancia física del cielo);
- * se escala para que, con "Luz ambiente" = 1, el contraste entre caras al sol y a la sombra se
+ * se escala para que, con "Luz ambiente" = 0,6 (valor por defecto), el contraste entre caras al sol y a la sombra se
  * parezca al de una foto exterior (medido en el visor sobre la manzana de ejemplo).
  */
 const SKY_ENV_SCALE = 0.5;
@@ -43,11 +41,6 @@ const TONE_MAPPINGS: Record<ToneMappingState['type'], ToneMapping> = {
   neutral: NeutralToneMapping,
   none: NoToneMapping,
 };
-
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
-  return t * t * (3 - 2 * t);
-}
 
 function makeSky(scale: number): Sky {
   const sky = new Sky();
@@ -97,7 +90,7 @@ export class SceneLighting {
       state.elevationDeg = angles.elevationDeg;
     }
     this.toSun.copy(sunDirection(state, state.northRotationDeg));
-    const daylight = smoothstep(TWILIGHT_DEG[0], TWILIGHT_DEG[1], state.elevationDeg);
+    const daylight = daylightFactor(state.elevationDeg);
     this.sun.intensity = state.intensity * daylight;
     this.sun.visible = daylight > 0;
     this.sun.color.setRGB(...kelvinToRgb(state.colorTempK));

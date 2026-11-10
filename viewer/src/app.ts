@@ -50,6 +50,8 @@ export class App {
   sceneBox: Box3 | null = null;
   /** Tipo de luz pendiente de colocar con el siguiente clic. */
   placing: LightType | null = null;
+  /** Nombre del HDRI cargado en esta sesión (el contenido no se guarda en las vistas). */
+  hdriName: string | null = null;
 
   private readonly listeners = { model: new Set<Listener>(), state: new Set<Listener>() };
   private readonly raycaster = new Raycaster();
@@ -114,6 +116,7 @@ export class App {
 
   async loadHdri(file: File): Promise<void> {
     this.lighting.setHdri(await loadHdri(file));
+    this.hdriName = file.name;
     this.state.ambient.hdri = file.name;
     this.state.ambient.background = 'hdri';
     this.applyAmbient();
@@ -289,6 +292,52 @@ export class App {
     this.lights.update();
     this.renderer.render(this.scene, this.nav.camera);
     this.stats.update(now);
+  }
+
+  get viewportAspect(): number {
+    return this.container.clientWidth / Math.max(this.container.clientHeight, 1);
+  }
+
+  /** Ajusta sombras y entorno antes de un render fuera del bucle (PNG). */
+  prepareFrame(): void {
+    this.lighting.fitShadows(this.state.shadows, this.nav.orbit.target, this.nav.distance);
+    this.lighting.update(Number.POSITIVE_INFINITY);
+  }
+
+  /**
+   * Aplica un estado completo (restaurar una vista). Copia los valores DENTRO de los objetos
+   * existentes: el panel está enlazado a ellos.
+   */
+  setState(next: ViewerState, animate: boolean): void {
+    const s = this.state;
+    Object.assign(s.sun, next.sun);
+    Object.assign(s.ambient, next.ambient);
+    Object.assign(s.shadows, next.shadows);
+    Object.assign(s.ground, next.ground);
+    Object.assign(s.tonemapping, next.tonemapping);
+    Object.assign(s.camera, next.camera);
+    s.lights.splice(0, s.lights.length, ...structuredClone(next.lights));
+    for (const [name, layer] of Object.entries(s.layers)) {
+      const incoming = next.layers[name];
+      layer.visible = incoming?.visible ?? true;
+      if (incoming?.colorOverride) layer.colorOverride = incoming.colorOverride;
+      else delete layer.colorOverride;
+    }
+    if (s.ambient.background === 'hdri' && s.ambient.hdri !== this.hdriName) {
+      this.notify(
+        `La vista usa el HDRI "${s.ambient.hdri ?? '?'}": cárgalo en Entorno para verlo.`,
+      );
+    }
+    this.lights.select(null);
+    this.applySun();
+    this.applyAmbient();
+    this.applyShadows();
+    this.applyToneMapping();
+    this.applyLayers();
+    this.applyLights();
+    this.applyGround();
+    this.nav.restore(s.camera, animate);
+    this.emit('state');
   }
 
   /** Estado completo serializable (cámara incluida). */

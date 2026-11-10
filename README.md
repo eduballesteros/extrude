@@ -3,7 +3,7 @@
 Convierte planos DWG/DXF urbanos (proyecto, manzana, barrio o ciudad) en modelos 3D glTF/GLB,
 y los previsualiza en un visor web con control de sol, luces y vistas exportables a Blender.
 
-> Estado: **Fase 4** (visor completo: capas, sol por fecha/lugar, sombras, HDRI, luces y tone mapping). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> Estado: **Fase 5** (vistas con miniaturas y exportación a views.json, Blender, GLB con cámaras y luces, y PNG). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requisitos
 
@@ -12,6 +12,7 @@ y los previsualiza en un visor web con control de sol, luces y vistas exportable
 | Python | ≥ 3.12 (probado con 3.13) | <https://www.python.org> o `pyenv` |
 | uv | ≥ 0.4 | `pip install uv` o <https://docs.astral.sh/uv/> |
 | Node.js | ≥ 22.12 | <https://nodejs.org> |
+| Blender (opcional) | ≥ 4.2; probado con 5.3 | `winget install BlenderFoundation.Blender`. Lo usan los tests de `blender_setup.py`; si está en otra ruta, defínela en `EXTRUDE_BLENDER_PATH` |
 | just | ≥ 1.38 | `uv tool install rust-just`, `winget install Casey.Just`, `brew install just` |
 
 Las herramientas Node de `tools/` (validador glTF y `gltf-transform` para `--compress`) se
@@ -119,6 +120,24 @@ Añade `&debug` a la URL para tener la app en `window.__extrude` desde la consol
 | Luces | Puntuales, focos y de área: se colocan con un clic en la escena y se mueven con un gizmo. Se editan desde el panel |
 | Render | Tone mapping AgX, ACES, Neutral o ninguno; exposición |
 | Rendimiento | Abajo a la izquierda: FPS, triángulos y draw calls |
+
+### Vistas y exportación
+
+El panel **Vistas** (a la izquierda) permite:
+- guardar el estado actual (cámara, sol, luces, capas, entorno) con miniatura;
+- restaurar con transición de cámara, renombrar, actualizar, duplicar, reordenar y borrar;
+- elegir la resolución de render y ver el **marco de cámara** con su encuadre exacto.
+
+Las vistas se guardan en el navegador (IndexedDB) por modelo. Exportaciones:
+
+| Archivo | Para qué |
+|---|---|
+| `views.json` | Todas las vistas, con `originOffset` y la cámara en coordenadas reales del DWG |
+| `blender_setup.py` | Cópialo junto al GLB y ejecútalo en Blender: crea cámaras, sol, luces y visibilidad por vista. `render_all()` renderiza todas |
+| `<modelo>_vistas.glb` | El GLB con cámaras de todas las vistas y luces de la activa (`KHR_lights_punctual`) |
+| `PNG` | Render de la vista actual a la resolución elegida |
+
+Detalles, conversiones y compatibilidad verificada: [docs/EXPORT_FORMATS.md](docs/EXPORT_FORMATS.md).
 
 Convenio de ejes: el +Y del dibujo es el −Z de la escena. "Norte (° horario)" gira el norte
 real respecto al +Y del dibujo.
