@@ -3,7 +3,7 @@
 Convierte planos DWG/DXF urbanos (proyecto, manzana, barrio o ciudad) en modelos 3D glTF/GLB,
 y los previsualiza en un visor web con control de sol, luces y vistas exportables a Blender.
 
-> Estado: **Fase 1** (lectura DXF e `extrude inspect`). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> Estado: **Fase 2** (topología, extrusión y configuración por proyecto; aún sin export GLB). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requisitos
 
@@ -63,6 +63,19 @@ Muestras sintéticas en `samples/` (se regeneran con `just samples`):
 | `nested_blocks.dxf` | Bloques anidados repetidos con rotación, escala, OCS invertido y atributo `PLANTAS` |
 | `faces_3d.dxf` | 3DFACE, MESH, polyface, SOLID 2D y sólidos ACIS (no soportados), en milímetros |
 | `dirty.dxf` | Polilínea casi cerrada, LINE/ARC sueltas, duplicados, pajarita, área nula, SPLINE, HATCH con hueco |
+
+## Configuración por proyecto
+
+Las alturas y el significado de cada capa dependen del proyecto, así que se declaran en un YAML.
+`init-config` genera un borrador a partir del propio plano (detecta atributos de plantas, textos
+tipo `4P`/`B+3`/`IV`/`12.5m` o cotas Z) para revisarlo y ajustarlo:
+
+```sh
+cd pipeline
+uv run extrude init-config ../samples/block_2d.dxf -o ../proyecto.yaml
+```
+
+Referencia completa: [docs/CONFIG.md](docs/CONFIG.md). Ejemplo comentado: `pipeline/config/example.yaml`.
 
 ## Estructura
 

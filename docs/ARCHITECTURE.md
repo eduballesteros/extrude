@@ -23,7 +23,7 @@ Se revisarán cuando llegue el DWG real.
 | Versión DWG | AutoCAD 2018 (AC1032). Se soporta DXF R2010–R2018+. |
 | Contenido | Mayoritariamente 2D (polilíneas por capa), con algo de 3DFACE/MESH; los sólidos ACIS se reportan como no soportados. |
 | Escala | Barrio (miles de edificios); se diseña para ciudad (~50 000 edificios) con fusión por capa e instancing. |
-| Alturas | Texto dentro del polígono con regex por defecto `(\d+)\s*P` (nº de plantas), altura por planta 3,0 m. |
+| Alturas | Dependen de cada proyecto: se configuran por capa en YAML (`init-config` propone un borrador). |
 | Destino de render | Blender (prioritario). Otros motores vía glTF, marcados como "no verificado". |
 | Conversor DWG | No instalado en el entorno de desarrollo: se trabaja con DXF; ODA/LibreDWG solo se prueban con dobles (mocks). |
 | Python | `requires-python >= 3.12`; desarrollado y probado con 3.13.2. |
@@ -48,6 +48,14 @@ Se revisarán cuando llegue el DWG real.
 - **Contabilidad**: cada entidad visitada se cuenta en `read`; si no se convierte acaba en
   `unsupported` (ACIS), `skipped` (DIMENSION, VIEWPORT, …) o `failed` (excepción al leerla, con
   aviso). Una entidad corrupta no aborta la lectura.
+- **Configuración** (`config.py`): pydantic con `extra=forbid` (una clave mal escrita es un error,
+  no se ignora). `init-config` genera un borrador por proyecto; ver docs/CONFIG.md.
+- **Topología** (`topology.py`): en metros. Extremos de LINE/ARC/polilíneas abiertas unidos por
+  clustering (KD-tree + union-find) dentro de `tolerance`, luego `polygonize_full`. Huecos por
+  contención par/impar con STRtree. Todo lo reparado o descartado se cuenta en `TopologyStats`.
+- **Extrusión** (`extrusion.py`): earcut para tapas con huecos; paredes con vértices propios
+  (sombreado plano). La orientación de cada triángulo se corrige por su área con signo, sin
+  depender del orden de salida de earcut.
 - **Coordenadas**: el lector trabaja en WCS (float64). El recentrado y el paso Z-up → Y-up
   `(x, y, z)_dwg → (x, z, -y)_gltf` se hacen solo al exportar.
 

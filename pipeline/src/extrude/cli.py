@@ -14,6 +14,7 @@ import typer
 from extrude.converters import MANUAL_EXPORT_HINT, converter_statuses, ensure_dxf
 from extrude.dxf_reader import read_dxf
 from extrude.errors import ExtrudeError
+from extrude.init_config import draft_config
 from extrude.inspection import format_text, summarize
 from extrude.model import LengthUnit
 
@@ -72,3 +73,24 @@ def inspect(
             typer.echo(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2))
         else:
             typer.echo(format_text(summary))
+
+
+@app.command("init-config")
+def init_config(
+    source: Annotated[Path, typer.Argument(help="Archivo .dwg o .dxf del proyecto")],
+    output: Annotated[
+        Path | None, typer.Option("-o", "--output", help="YAML de salida (por defecto, stdout)")
+    ] = None,
+    units: Annotated[LengthUnit | None, typer.Option(help="Fuerza las unidades del dibujo")] = None,
+    force: Annotated[bool, typer.Option(help="Sobrescribe el YAML si ya existe")] = False,
+) -> None:
+    """Genera un borrador de configuración YAML adaptado a las capas de este dibujo."""
+    with _user_errors(), tempfile.TemporaryDirectory(prefix="extrude-") as workdir:
+        if output is not None and output.exists() and not force:
+            raise ExtrudeError(f"'{output}' ya existe.", "Usa otro nombre con -o o añade --force.")
+        document = draft_config(read_dxf(ensure_dxf(source, Path(workdir)), units_override=units))
+        if output is None:
+            typer.echo(document)
+        else:
+            output.write_text(document, encoding="utf-8")
+            typer.echo(f"Borrador escrito en {output}. Revísalo antes de convertir.")
