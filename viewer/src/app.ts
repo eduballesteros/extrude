@@ -1,0 +1,299 @@
+import {
+  type Box3,
+  type Mesh,
+  type Object3D,
+  Raycaster,
+  Scene,
+  SRGBColorSpace,
+  Vector2,
+  WebGLRenderer,
+} from 'three';
+import { loadHdri } from './scene/environment';
+import { Ground } from './scene/ground';
+import { LayerManager } from './scene/layers';
+import { SceneLighting } from './scene/lighting';
+import { ExtraLights, newLightState } from './scene/lights';
+import { type LoadedModel, loadFromFile, loadFromUrl } from './scene/loader';
+import { boundsOf, Navigation } from './scene/navigation';
+import { describeHit, firstVisibleHit } from './scene/picking';
+import { composeIso, splitIso } from './scene/sun';
+import { defaultState, type LightType, type Vec3, type ViewerState } from './state';
+import { InfoPanel } from './ui/info';
+import { StatsOverlay } from './ui/stats';
+
+/** Desplazamiento máximo del puntero (px) para considerar un clic y no un arrastre. */
+const CLICK_TOLERANCE_PX = 4;
+/** Altura sobre la superficie a la que se coloca una luz nueva (m). */
+const LIGHT_PLACEMENT_OFFSET_M = 3;
+const LINE_PICK_THRESHOLD_M = 0.5;
+
+export interface DayAnimation {
+  playing: boolean;
+  hoursPerSecond: number;
+}
+
+type Listener = () => void;
+
+export class App {
+  readonly renderer: WebGLRenderer;
+  readonly scene = new Scene();
+  readonly state: ViewerState = defaultState();
+  readonly animation: DayAnimation = { playing: false, hoursPerSecond: 1 };
+  readonly nav: Navigation;
+  readonly lighting: SceneLighting;
+  readonly layers = new LayerManager();
+  readonly lights: ExtraLights;
+  readonly info = new InfoPanel();
+  readonly ground = new Ground();
+  readonly stats: StatsOverlay;
+  model: LoadedModel | null = null;
+  sceneBox: Box3 | null = null;
+  /** Tipo de luz pendiente de colocar con el siguiente clic. */
+  placing: LightType | null = null;
+
+  private readonly listeners = { model: new Set<Listener>(), state: new Set<Listener>() };
+  private readonly raycaster = new Raycaster();
+  private pointerDown = new Vector2();
+  private lastFrame = performance.now();
+  private shadowsDirty = true;
+
+  constructor(private readonly container: HTMLElement) {
+    this.renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: false });
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.outputColorSpace = SRGBColorSpace;
+    container.appendChild(this.renderer.domElement);
+
+    this.nav = new Navigation(
+      this.renderer.domElement,
+      (camera) => this.lights.setCamera(camera),
+      () =>
+        this.notify(
+          'El navegador no concedió el bloqueo del puntero: haz clic en la vista y vuelve a intentarlo.',
+        ),
+    );
+    this.lighting = new SceneLighting(this.scene, this.renderer);
+    this.lights = new ExtraLights(
+      this.scene,
+      this.nav.camera,
+      this.renderer.domElement,
+      this.nav.orbit,
+      (id, position) => this.moveLight(id, position),
+    );
+    this.stats = new StatsOverlay(this.renderer);
+    this.raycaster.params.Line = { threshold: LINE_PICK_THRESHOLD_M };
+    this.scene.add(this.ground.mesh);
+    document.body.append(this.stats.element, this.info.element);
+
+    this.bindPointer();
+    window.addEventListener('resize', () => this.resize());
+    this.resize();
+    this.applyAll();
+    this.renderer.setAnimationLoop((now: number) => this.frame(now));
+  }
+
+  /** Mensaje breve en la barra de estado. */
+  notify(message: string): void {
+    const status = document.querySelector('#status');
+    if (status) status.textContent = message;
+  }
+
+  on(event: keyof App['listeners'], listener: Listener): void {
+    this.listeners[event].add(listener);
+  }
+
+  private emit(event: keyof App['listeners']): void {
+    for (const listener of this.listeners[event]) listener();
+  }
+
+  async load(source: string | File): Promise<LoadedModel> {
+    const model =
+      typeof source === 'string' ? await loadFromUrl(source) : await loadFromFile(source);
+    this.setModel(model);
+    return model;
+  }
+
+  async loadHdri(file: File): Promise<void> {
+    this.lighting.setHdri(await loadHdri(file));
+    this.state.ambient.hdri = file.name;
+    this.state.ambient.background = 'hdri';
+    this.applyAmbient();
+    this.emit('state');
+  }
+
+  private setModel(model: LoadedModel): void {
+    if (this.model) this.scene.remove(this.model.root);
+    this.model = model;
+    model.root.traverse((o: Object3D) => {
+      const mesh = o as Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
+    });
+    this.scene.add(model.root);
+    this.sceneBox = boundsOf(model.root);
+    this.nav.setSceneBox(this.sceneBox);
+    this.nav.frame(this.sceneBox);
+    this.lighting.setSceneBox(this.sceneBox);
+    this.ground.fit(this.sceneBox);
+    this.layers.attach(model.root);
+    this.state.layers = this.layers.initialState();
+    this.info.hide();
+    this.applyAll();
+    this.emit('model');
+  }
+
+  // --- Aplicar estado -------------------------------------------------------
+
+  applyAll(): void {
+    this.applySun();
+    this.applyAmbient();
+    this.applyShadows();
+    this.applyToneMapping();
+    this.applyLayers();
+    this.applyLights();
+    this.applyGround();
+    this.applyCamera();
+  }
+
+  applyGround(): void {
+    this.ground.apply(this.state.ground);
+  }
+
+  applySun(): void {
+    this.lighting.applySun(this.state.sun);
+    this.shadowsDirty = true;
+  }
+
+  applyAmbient(): void {
+    this.lighting.applyAmbient(this.state.ambient);
+  }
+
+  applyShadows(): void {
+    this.lighting.applyShadows(this.state.shadows);
+    this.shadowsDirty = true;
+  }
+
+  applyToneMapping(): void {
+    this.lighting.applyToneMapping(this.state.tonemapping);
+  }
+
+  applyLayers(): void {
+    this.layers.apply(this.state.layers);
+  }
+
+  applyLights(): void {
+    this.lights.sync(this.state.lights);
+  }
+
+  applyCamera(): void {
+    this.nav.setType(this.state.camera.type);
+    this.nav.setFov(this.state.camera.fovDeg);
+  }
+
+  /** Cambia la hora del día conservando fecha y desfase (para el control y la animación). */
+  setHours(hours: number): void {
+    const { day, utcOffsetH } = splitIso(this.state.sun.isoDate);
+    this.state.sun.isoDate = composeIso(day, ((hours % 24) + 24) % 24, utcOffsetH);
+    this.applySun();
+  }
+
+  // --- Luces adicionales ----------------------------------------------------
+
+  addLight(type: LightType, position: Vec3, target: Vec3): string {
+    const light = newLightState(type, position, target);
+    this.state.lights.push(light);
+    this.applyLights();
+    this.lights.select(light.id);
+    this.emit('state');
+    return light.id;
+  }
+
+  removeLight(id: string): void {
+    this.state.lights = this.state.lights.filter((l) => l.id !== id);
+    this.applyLights();
+    this.emit('state');
+  }
+
+  private moveLight(id: string, position: Vec3): void {
+    const light = this.state.lights.find((l) => l.id === id);
+    if (light) light.position = position;
+  }
+
+  // --- Interacción ----------------------------------------------------------
+
+  private bindPointer(): void {
+    const dom = this.renderer.domElement;
+    dom.addEventListener('pointerdown', (e) => this.pointerDown.set(e.clientX, e.clientY));
+    dom.addEventListener('pointerup', (e) => {
+      if (e.button !== 0 || this.nav.flying || this.lights.dragging) return;
+      if (this.pointerDown.distanceTo(new Vector2(e.clientX, e.clientY)) > CLICK_TOLERANCE_PX)
+        return;
+      this.onClick(e);
+    });
+    dom.addEventListener('dblclick', (e) => {
+      const hit = this.hitAt(e);
+      if (hit) this.nav.focus(hit.point);
+    });
+  }
+
+  private hitAt(event: MouseEvent): ReturnType<typeof firstVisibleHit> {
+    if (!this.model) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(ndc, this.nav.camera);
+    return firstVisibleHit(this.raycaster.intersectObject(this.model.root, true));
+  }
+
+  private onClick(event: MouseEvent): void {
+    const hit = this.hitAt(event);
+    if (this.placing) {
+      if (!hit) return;
+      const normal = hit.face?.normal.clone().transformDirection(hit.object.matrixWorld);
+      const position = hit.point.clone();
+      if (normal && normal.y < 0.5) position.addScaledVector(normal, LIGHT_PLACEMENT_OFFSET_M);
+      else position.y += LIGHT_PLACEMENT_OFFSET_M;
+      this.addLight(this.placing, position.toArray(), hit.point.toArray());
+      this.placing = null;
+      return;
+    }
+    if (hit) this.info.show(describeHit(hit));
+    else this.info.hide();
+  }
+
+  // --- Bucle ----------------------------------------------------------------
+
+  private resize(): void {
+    const { clientWidth: w, clientHeight: h } = this.container;
+    this.renderer.setSize(w, h);
+    this.nav.resize(w, h);
+  }
+
+  private frame(now: number): void {
+    const dt = Math.min((now - this.lastFrame) / 1000, 0.1);
+    this.lastFrame = now;
+    if (this.animation.playing && this.state.sun.mode === 'datetime') {
+      this.setHours(splitIso(this.state.sun.isoDate).hours + this.animation.hoursPerSecond * dt);
+      this.emit('state');
+    }
+    this.nav.update(dt);
+    const viewFit = this.state.shadows.fit !== 'scene';
+    if (this.shadowsDirty || viewFit) {
+      this.lighting.fitShadows(this.state.shadows, this.nav.orbit.target, this.nav.distance);
+      this.shadowsDirty = false;
+    }
+    this.lighting.update(now);
+    this.lights.update();
+    this.renderer.render(this.scene, this.nav.camera);
+    this.stats.update(now);
+  }
+
+  /** Estado completo serializable (cámara incluida). */
+  snapshot(): ViewerState {
+    this.state.camera = this.nav.snapshot();
+    return structuredClone(this.state);
+  }
+}

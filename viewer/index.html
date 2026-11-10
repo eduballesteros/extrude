@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Extrude Viewer</title>
     <style>
       html,
@@ -34,6 +35,36 @@
         background: rgb(0 0 0 / 55%);
         padding: 6px 10px;
         border-radius: 6px;
+      }
+      .info {
+        position: fixed;
+        right: 8px;
+        bottom: 8px;
+        max-width: 360px;
+        max-height: 45vh;
+        overflow: auto;
+        color: #fff;
+        background: rgb(0 0 0 / 70%);
+        padding: 8px 12px;
+        border-radius: 6px;
+      }
+      .info h3 {
+        margin: 0 0 6px;
+        font-size: 14px;
+        overflow-wrap: anywhere;
+      }
+      .info dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2px 10px;
+        margin: 0;
+      }
+      .info dt {
+        opacity: 0.7;
+      }
+      .info dd {
+        margin: 0;
+        overflow-wrap: anywhere;
       }
       .stats {
         position: fixed;

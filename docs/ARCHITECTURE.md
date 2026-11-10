@@ -65,6 +65,19 @@ Se revisarán cuando llegue el DWG real.
   del INSERT (alturas por atributo, contornos fusionados).
 - **Herramientas Node** (`tools/`): validador de Khronos y `gltf-transform` se ejecutan con `node`
   directamente (nunca con `npx.cmd` ni shell), con rutas generadas por Extrude.
+- **Visor**: el estado (`viewer/src/state.ts`) es un objeto JSON plano. Los módulos de escena lo
+  aplican (`App.applyX()`) y la interfaz lo modifica, así que una vista de la Fase 5 es una copia de ese estado.
+- **Sol**: `suncalc` mide el azimut desde el sur y positivo al oeste; se convierte a la
+  convención geográfica (desde el norte, sentido horario). Los tests lo comparan con referencias
+  astronómicas independientes (elevación en el mediodía solar de los solsticios, salida del sol
+  por el este en el equinoccio), no solo con el propio suncalc.
+- **Sombras**: en lugar de CSM, un único shadow map ajustado a la caja de la escena o, si su
+  diagonal pasa de 1,5 km, a la zona visible alrededor del objetivo, redondeado a la rejilla de texels
+  para que no tiemble. Es más simple que CSM (que exige parchear los materiales) y en la ciudad de
+  prueba da 60 FPS. `PCFSoftShadowMap` ya no existe en Three.js 0.187: se usa PCF con radio, o VSM.
+- **Entorno**: el cielo procedural genera el mapa de entorno (PMREM, regenerado como mucho cada
+  200 ms al mover el sol) escalado ×0,5. La luz hemisférica solo se usa con fondo de color liso,
+  para no sumar dos veces la luz ambiente.
 - **Coordenadas**: el lector trabaja en WCS (float64). El recentrado y el paso Z-up → Y-up
   `(x, y, z)_dwg → (x, z, -y)_gltf` se hacen solo al exportar.
 
@@ -99,5 +112,10 @@ Se revisarán cuando llegue el DWG real.
 | gltf-validator | Validación oficial de Khronos (tests y `just validate`) |
 | @gltf-transform/cli | Compresión Draco/Meshopt opcional (`--compress`) |
 
-`suncalc` y `lil-gui` se añadirán en la Fase 4, cuando se usen.
+### Visor: dependencias de la Fase 4
+
+| Paquete | Para qué |
+|---|---|
+| suncalc 1.9.0 | Posición solar (la versión clásica, la que encaja con `@types/suncalc` 1.9.2) |
+| lil-gui 0.21 | Panel de control ligero; pone los nombres con `textContent`, así que los nombres de capa del DWG no son un riesgo de inyección |
 TypeScript se fija en 6.0.x porque `typescript-eslint` 8.x aún no admite TS 7.

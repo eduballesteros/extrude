@@ -3,7 +3,7 @@
 Convierte planos DWG/DXF urbanos (proyecto, manzana, barrio o ciudad) en modelos 3D glTF/GLB,
 y los previsualiza en un visor web con control de sol, luces y vistas exportables a Blender.
 
-> Estado: **Fase 3** (export GLB recentrado, instancing, teselas, compresión e informe; visor básico). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> Estado: **Fase 4** (visor completo: capas, sol por fecha/lugar, sombras, HDRI, luces y tone mapping). Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requisitos
 
@@ -100,10 +100,28 @@ Con las muestras: `just convert-samples` y `just validate out/block_2d/model.glb
 just dev                # http://localhost:5173
 ```
 
-Arrastra un `.glb` a la ventana, usa el selector o abre `http://localhost:5173/?model=/models/x.glb`,
-con el archivo copiado en `viewer/public/models/`. Abajo a la izquierda se ven los FPS, los
-triángulos y los draw calls.
+Para abrir un modelo:
+- arrastra un `.glb` a la ventana;
+- usa el selector de archivo;
+- o abre `http://localhost:5173/?model=/models/x.glb`, con el archivo en `viewer/public/models/`.
 
+Añade `&debug` a la URL para tener la app en `window.__extrude` desde la consola.
+
+| Función | Cómo |
+|---|---|
+| Navegar | Órbita con el ratón. Vuelo: botón "Vuelo", luego WASD, Q/E para bajar/subir, Shift para ir rápido y Esc para salir. Proyección perspectiva u ortográfica, FOV ajustable. |
+| Centrar | Doble clic sobre un objeto |
+| Información | Clic sobre un objeto: capa, altura, de dónde sale la altura, tipo DXF, handle, bloque e instancia |
+| Capas | Panel "Capas": visible, color, aislar, mostrar todas |
+| Sol | Por fecha, hora local, UTC±, latitud y longitud (suncalc) o manual (azimut y elevación). También rotación del norte, intensidad, temperatura de color y animación del día |
+| Sombras | Ajuste automático a toda la escena o, si mide más de 1,5 km, a la zona visible. Resolución, filtro PCF o VSM, suavizado, bias y normal bias |
+| Entorno | Cielo procedural, HDRI (`.hdr`/`.exr`) con rotación e intensidad, o color liso. Suelo opcional que recibe sombras |
+| Luces | Puntuales, focos y de área: se colocan con un clic en la escena y se mueven con un gizmo. Se editan desde el panel |
+| Render | Tone mapping AgX, ACES, Neutral o ninguno; exposición |
+| Rendimiento | Abajo a la izquierda: FPS, triángulos y draw calls |
+
+Convenio de ejes: el +Y del dibujo es el −Z de la escena. "Norte (° horario)" gira el norte
+real respecto al +Y del dibujo.
 ## Rendimiento medido
 
 Ciudad sintética (`just bench`): 50 000 edificios con rótulo de plantas y 12 500 árboles, en UTM.
@@ -118,7 +136,8 @@ Medido en Windows 11 con Python 3.13 y una RTX 3050 Ti Laptop.
 | **Total** (`extrude convert`) | **83 s** |
 
 Resultado: 1 675 010 triángulos, 3 draw calls (los árboles instanciados) y un GLB de 34 MB.
-En el visor, a 2133×950 y sin sombras, se mantiene en **60 FPS** (límite de vsync) en Chrome.
+En el visor, a 2133×950, se mantiene en **60 FPS** (límite de vsync) en Chrome, **con sombras**
+(mapa de 4096 ajustado a la zona visible; 3,35 M triángulos por fotograma contando la pasada de sombras).
 
 ## Estructura
 
