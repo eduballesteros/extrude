@@ -35,6 +35,30 @@ export function sunDirection(angles: SunAngles, northRotationDeg = 0): Vector3 {
   ).normalize();
 }
 
+export interface SunTimes {
+  /** Horas locales decimales; null en día o noche polar. */
+  sunrise: number | null;
+  sunset: number | null;
+  noon: number;
+}
+
+/** Amanecer, mediodía solar y ocaso en hora local (con el desfase indicado). */
+export function sunTimes(day: string, lat: number, lon: number, utcOffsetH: number): SunTimes {
+  const noonLocal = new Date(composeIso(day, 12, utcOffsetH));
+  const times = SunCalc.getTimes(noonLocal, lat, lon);
+  const local = (date: Date): number | null => {
+    const t = date.getTime();
+    if (Number.isNaN(t)) return null;
+    const hours = (((t / 3_600_000 + utcOffsetH) % 24) + 24) % 24;
+    return hours;
+  };
+  return {
+    sunrise: local(times.sunrise),
+    sunset: local(times.sunset),
+    noon: local(times.solarNoon) ?? 12,
+  };
+}
+
 /** El sol se apaga gradualmente entre estas elevaciones (crepúsculo). */
 export const TWILIGHT_DEG: [number, number] = [-2, 4];
 

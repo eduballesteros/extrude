@@ -14,7 +14,6 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "lil-gui": "0.21.0",
     "suncalc": "1.9.0",
     "three": "0.187.0"
   },

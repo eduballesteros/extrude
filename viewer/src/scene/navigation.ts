@@ -38,6 +38,20 @@ interface Tween {
   elapsed: number;
 }
 
+/** Vistas estándar. Los puntos cardinales son los del dibujo (+Y DWG = norte = −Z escena). */
+export type ViewPreset = 'top' | 'north' | 'south' | 'east' | 'west' | 'iso';
+
+/** Dirección desde el objetivo hacia la cámara para cada vista estándar. */
+export const PRESET_DIRECTIONS: Record<ViewPreset, Vec3> = {
+  // Planta: casi vertical, con un mínimo desplazamiento al sur para que el norte quede arriba
+  top: [0, 1, 1e-4],
+  north: [0, 0, -1],
+  south: [0, 0, 1],
+  east: [1, 0, 0],
+  west: [-1, 0, 0],
+  iso: [1, 0.8, 1],
+};
+
 export function boundsOf(object: Object3D): Box3 {
   object.updateMatrixWorld(true);
   return new Box3().setFromObject(object);
@@ -150,6 +164,13 @@ export class Navigation {
       toPosition: point.clone().add(offset),
       elapsed: 0,
     };
+  }
+
+  /** Anima la cámara a una vista estándar conservando objetivo y distancia. */
+  viewFrom(preset: ViewPreset): void {
+    const direction = new Vector3(...PRESET_DIRECTIONS[preset]).normalize();
+    const target = this.orbit.target.clone();
+    this.animateTo(target.clone().addScaledVector(direction, this.distance), target);
   }
 
   /** Igual que `focus`, pero hacia una posición y objetivo concretos (restaurar vistas). */

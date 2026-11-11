@@ -242,7 +242,7 @@ def build_glb(layers: Sequence[ExportLayer], info: SceneInfo) -> tuple[bytes, Gl
             primitives.append(prim)
             triangles += tri
             lo, hi = np.minimum(lo, b[0]), np.maximum(hi, b[1])
-            extras["objects"] = _object_table(layer.objects)
+            extras["objects"] = _object_table(layer.objects, layer.rule)
         if layer.lines:
             prim, b = _line_primitive(builder, layer.lines, info.origin, material)
             primitives.append(prim)
@@ -410,9 +410,20 @@ def _box_corners(vertices: NDArray[np.float64]) -> NDArray[np.float64]:
     )
 
 
-def _object_table(objects: Sequence[SceneObject]) -> dict[str, list[Any]]:
+def _object_table(objects: Sequence[SceneObject], rule: LayerRule) -> dict[str, list[Any]]:
+    """Metadatos por objeto (arrays paralelos). loors = altura / altura de planta (edificios);
+    ase = cota de la base en metros (ejes DWG, sin recentrar en Z)."""
+    building = rule.kind is Kind.BUILDING
     return {
         "height": [None if o.height is None else round(o.height, 3) for o in objects],
+        "floors": [
+            round(o.height / rule.floor_height) if building and o.height is not None else None
+            for o in objects
+        ],
+        "base": [
+            round(float(o.mesh.vertices[:, 2].min()), 3) if len(o.mesh.vertices) else None
+            for o in objects
+        ],
         "height_origin": [o.height_origin.value if o.height_origin else None for o in objects],
         "source_type": [o.source_type for o in objects],
         "handle": [o.handles[0] if o.handles else None for o in objects],

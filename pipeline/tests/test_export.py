@@ -121,6 +121,8 @@ def test_object_ids_and_metadata(utm: tuple[ConvertResult, Glb]) -> None:
     assert sorted(set(ids.astype(int))) == [0, 1, 2, 3]
     table = glb.node("EDIFICIOS")["extras"]["objects"]
     assert table["height"] == [b.floors * 3.0 for b in s.BUILDINGS]
+    assert table["floors"] == [b.floors for b in s.BUILDINGS]
+    assert table["base"] == [0.0] * len(s.BUILDINGS)
     assert set(table["height_origin"]) == {"text"}
     assert all(table["handle"])
 

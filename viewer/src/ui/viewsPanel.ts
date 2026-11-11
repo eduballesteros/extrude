@@ -1,160 +1,96 @@
 import type { App } from '../app';
 import { RENDER_PRESETS, type ViewManager } from '../views/viewManager';
 import type { SceneView } from '../views/viewState';
+import { button, h, icon, toggle } from './dom';
 import type { FrameOverlay } from './frameOverlay';
 
 /** Tiempo para confirmar un borrado con un segundo clic (sin diálogos modales). */
 const CONFIRM_MS = 3000;
 const MAX_RENDER_PX = 16384;
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = Object.assign(document.createElement(tag), props);
-  node.append(...children);
-  return node;
-}
-
-function button(label: string, title: string, onClick: () => void): HTMLButtonElement {
-  const b = el('button', { type: 'button', textContent: label, title });
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-/** Panel lateral de vistas: crear, restaurar, renombrar, duplicar, reordenar, borrar y exportar. */
+/** Pestaña Vistas: formato de render, marco de cámara y tarjetas de vistas guardadas. */
 export class ViewsPanel {
-  readonly element = el('section', { className: 'views-panel' });
-  private readonly list = el('ol', { className: 'views-list' });
-  private readonly widthInput = el('input', {
+  readonly element = h('div', { class: 'tab-panel' });
+  private readonly list = h('ol', { class: 'view-list' });
+  private readonly preset = h('select', { class: 'select', title: 'Formato de render' });
+  private readonly width = h('input', {
     type: 'number',
+    class: 'num',
     min: '16',
     max: String(MAX_RENDER_PX),
   });
-  private readonly heightInput = el('input', {
+  private readonly height = h('input', {
     type: 'number',
+    class: 'num',
     min: '16',
     max: String(MAX_RENDER_PX),
   });
-  private readonly frameToggle = el('input', { type: 'checkbox' });
+  private readonly frameToggle: ReturnType<typeof toggle>;
 
   constructor(
     private readonly app: App,
     private readonly views: ViewManager,
     private readonly frame: FrameOverlay,
   ) {
-    this.element.append(this.header(), this.renderSettings(), this.list, this.exports());
-    document.body.appendChild(this.element);
-    views.on(() => this.refresh());
-    this.refresh();
-  }
-
-  private header(): HTMLElement {
-    const title = el('h2', { textContent: 'Vistas' });
-    const collapse = button('–', 'Plegar el panel', () => {
-      this.element.classList.toggle('collapsed');
-      collapse.textContent = this.element.classList.contains('collapsed') ? '+' : '–';
-    });
-    const add = button('＋ Nueva vista', 'Guardar cámara, sol, luces y capas actuales', () =>
-      this.guard(() => this.views.create()),
-    );
-    return el('header', {}, title, add, collapse);
-  }
-
-  private renderSettings(): HTMLElement {
-    const preset = el('select', { title: 'Resolución de render' });
-    preset.append(el('option', { value: '', textContent: 'Personalizada' }));
+    this.preset.append(h('option', { value: '', textContent: 'Personalizado' }));
     RENDER_PRESETS.forEach((p, i) =>
-      preset.append(
-        el('option', { value: String(i), textContent: `${p.label} (${p.width}×${p.height})` }),
+      this.preset.append(
+        h('option', { value: String(i), textContent: `${p.label} · ${p.width}×${p.height}` }),
       ),
     );
-    preset.addEventListener('change', () => {
-      const p = RENDER_PRESETS[Number(preset.value)];
-      if (p) this.views.setRender(p.width, p.height);
+    this.preset.addEventListener('change', () => {
+      const p = RENDER_PRESETS[Number(this.preset.value)];
+      if (p) views.setRender(p.width, p.height);
     });
     const applySize = (): void => {
-      const w = Number(this.widthInput.value);
-      const h = Number(this.heightInput.value);
-      if (w >= 16 && h >= 16 && w <= MAX_RENDER_PX && h <= MAX_RENDER_PX) {
-        preset.value = '';
-        this.views.setRender(w, h);
-      }
+      const w = Number(this.width.value);
+      const hh = Number(this.height.value);
+      if (w >= 16 && hh >= 16 && w <= MAX_RENDER_PX && hh <= MAX_RENDER_PX) views.setRender(w, hh);
     };
-    this.widthInput.addEventListener('change', applySize);
-    this.heightInput.addEventListener('change', applySize);
-    this.frameToggle.addEventListener('change', () => {
-      this.views.showFrame = this.frameToggle.checked;
+    this.width.addEventListener('change', applySize);
+    this.height.addEventListener('change', applySize);
+    this.frameToggle = toggle('Marco de encuadre', views.showFrame, (v) => {
+      views.showFrame = v;
       this.syncFrame();
     });
-    return el(
-      'div',
-      { className: 'render-settings' },
-      preset,
-      el('label', {}, this.widthInput, ' × ', this.heightInput, ' px'),
-      el('label', {}, this.frameToggle, ' Marco de cámara'),
-    );
-  }
 
-  private exports(): HTMLElement {
-    const importInput = el('input', {
-      type: 'file',
-      accept: '.json,application/json',
-      hidden: true,
+    const add = button({
+      label: 'Nueva vista',
+      icon: 'plus',
+      variant: 'primary',
+      title: 'Guardar cámara, sol, luces y capas (N)',
+      onClick: () => this.guard(() => views.create()),
     });
-    importInput.addEventListener('change', () => {
-      const file = importInput.files?.[0];
-      importInput.value = '';
-      if (!file) return;
-      this.views
-        .importViewsJson(file)
-        .then((n) => this.app.notify(`${n} vistas importadas.`))
-        .catch((error: unknown) => this.app.notify(`views.json no válido: ${String(error)}`));
-    });
-    return el(
-      'footer',
-      {},
-      el('h3', { textContent: 'Exportar' }),
-      button(
-        'views.json',
-        'Todas las vistas, con origin_offset para volver a coordenadas reales',
-        () => this.guard(() => this.views.exportViewsJson()),
+    add.classList.add('btn-block');
+
+    this.element.append(
+      h(
+        'div',
+        { class: 'render-settings' },
+        h('span', { class: 'field-label', textContent: 'Formato de render' }),
+        this.preset,
+        h(
+          'div',
+          { class: 'size-row' },
+          this.width,
+          h('span', { class: 'muted', textContent: '×' }),
+          this.height,
+          h('span', { class: 'muted', textContent: 'px' }),
+        ),
+        this.frameToggle.element,
       ),
-      button('Importar…', 'Añadir vistas desde un views.json', () => importInput.click()),
-      button(
-        'blender_setup.py',
-        'Script de Blender: importa el GLB y crea cámaras, sol y luces',
-        () => this.guard(() => this.views.exportBlenderScript()),
-      ),
-      button(
-        'GLB + cámaras y luces',
-        'Cámaras de todas las vistas y luces de la activa (KHR_lights_punctual)',
-        () =>
-          this.guard(() => {
-            const skipped = this.views.exportGlbWithLights();
-            if (skipped.length) this.app.notify(`GLB exportado. Omitido: ${skipped.join('; ')}`);
-          }),
-      ),
-      button('PNG', 'Render de la vista actual a la resolución elegida', () => {
-        this.app.notify('Renderizando PNG…');
-        this.views
-          .exportPng()
-          .then(() => this.app.notify('PNG exportado.'))
-          .catch((error: unknown) =>
-            this.app.notify(`No se pudo exportar el PNG: ${String(error)}`),
-          );
-      }),
-      importInput,
+      add,
+      this.list,
     );
+    views.on(() => this.render());
+    this.render();
   }
 
   private guard(action: () => unknown): void {
     try {
       action();
     } catch (error) {
-      console.error(error);
-      this.app.notify(String(error instanceof Error ? error.message : error));
+      this.app.notify(String(error instanceof Error ? error.message : error), 'error');
     }
   }
 
@@ -162,61 +98,108 @@ export class ViewsPanel {
     this.frame.set(this.views.aspect, this.views.showFrame);
   }
 
-  private refresh(): void {
-    this.widthInput.value = String(this.views.render.width);
-    this.heightInput.value = String(this.views.render.height);
-    this.frameToggle.checked = this.views.showFrame;
+  private render(): void {
+    const { views } = this;
+    const { width, height } = views.render;
+    this.width.value = String(width);
+    this.height.value = String(height);
+    const match = RENDER_PRESETS.findIndex((p) => p.width === width && p.height === height);
+    this.preset.value = match >= 0 ? String(match) : '';
+    this.frameToggle.set(views.showFrame);
     this.syncFrame();
-    this.list.replaceChildren(...this.views.views.map((view, i) => this.item(view, i)));
-    if (this.views.views.length === 0) {
+    this.list.replaceChildren(...views.views.map((view, i) => this.card(view, i)));
+    if (views.views.length === 0) {
       this.list.append(
-        el('li', {
-          className: 'empty',
-          textContent: 'Sin vistas: encuadra y pulsa "Nueva vista".',
-        }),
+        h(
+          'li',
+          { class: 'empty-state' },
+          icon('views', 22),
+          h('strong', { textContent: 'Sin vistas guardadas' }),
+          h('span', { textContent: 'Encuadra la escena, ajusta el sol y pulsa "Nueva vista".' }),
+        ),
       );
     }
   }
 
-  private item(view: SceneView, index: number): HTMLLIElement {
+  private card(view: SceneView, index: number): HTMLLIElement {
     const { views } = this;
-    const thumb = el('img', { alt: '', width: 96 });
-    if (view.thumbnailDataUrl?.startsWith('data:image/')) thumb.src = view.thumbnailDataUrl;
+    const thumb = h('button', { type: 'button', class: 'view-thumb', title: 'Restaurar vista' });
+    if (view.thumbnailDataUrl?.startsWith('data:image/')) {
+      thumb.append(h('img', { src: view.thumbnailDataUrl, alt: '' }));
+    } else {
+      thumb.append(icon('image', 20));
+    }
+    thumb.append(h('span', { class: 'view-index', textContent: String(index + 1) }));
     thumb.addEventListener('click', () => views.restore(view.id));
-    const name = el('input', { value: view.name, title: 'Renombrar' });
+
+    const name = h('input', { class: 'view-name', value: view.name, title: 'Renombrar' });
     name.addEventListener('change', () => views.rename(view.id, name.value));
-    const meta = el('small', {
-      textContent: `${view.render.width}×${view.render.height} · ${view.camera.type === 'perspective' ? 'persp.' : 'orto.'}`,
+    name.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') name.blur();
     });
-    const remove = button('🗑', 'Borrar (pulsa dos veces)', () => {
+    const time = view.sun.mode === 'datetime' ? view.sun.isoDate.slice(11, 16) : 'manual';
+    const meta = h('span', {
+      class: 'view-meta',
+      textContent: `${view.render.width}×${view.render.height} · ${view.camera.type === 'perspective' ? 'Persp.' : 'Orto.'} · ☀ ${time}`,
+    });
+
+    const remove = button({
+      icon: 'trash',
+      title: 'Borrar (pulsa dos veces)',
+      variant: 'ghost',
+      size: 'sm',
+    });
+    remove.addEventListener('click', () => {
       if (remove.dataset['armed']) {
         views.remove(view.id);
         return;
       }
       remove.dataset['armed'] = '1';
-      remove.textContent = '¿Borrar?';
+      remove.classList.add('is-armed');
+      remove.title = 'Pulsa otra vez para borrar';
       setTimeout(() => {
         delete remove.dataset['armed'];
-        remove.textContent = '🗑';
+        remove.classList.remove('is-armed');
       }, CONFIRM_MS);
     });
-    const actions = el(
+    const actions = h(
       'div',
-      { className: 'actions' },
-      button('↺', 'Restaurar (anima la cámara)', () => views.restore(view.id)),
-      button('⟳', 'Actualizar con el estado actual', () => this.guard(() => views.update(view.id))),
-      button('⧉', 'Duplicar', () => views.duplicate(view.id)),
-      button('↑', 'Subir', () => views.move(view.id, -1)),
-      button('↓', 'Bajar', () => views.move(view.id, 1)),
+      { class: 'row-actions' },
+      button({
+        icon: 'refresh',
+        title: 'Actualizar con el estado actual',
+        variant: 'ghost',
+        size: 'sm',
+        onClick: () => this.guard(() => views.update(view.id)),
+      }),
+      button({
+        icon: 'copy',
+        title: 'Duplicar',
+        variant: 'ghost',
+        size: 'sm',
+        onClick: () => views.duplicate(view.id),
+      }),
+      button({
+        icon: 'arrow-up',
+        title: 'Subir',
+        variant: 'ghost',
+        size: 'sm',
+        onClick: () => views.move(view.id, -1),
+      }),
+      button({
+        icon: 'arrow-down',
+        title: 'Bajar',
+        variant: 'ghost',
+        size: 'sm',
+        onClick: () => views.move(view.id, 1),
+      }),
       remove,
     );
-    const li = el(
+    return h(
       'li',
-      { className: view.id === views.activeId ? 'active' : '' },
+      { class: `view-card${view.id === views.activeId ? ' is-active' : ''}` },
       thumb,
-      el('div', {}, name, meta, actions),
+      h('div', { class: 'view-body' }, name, meta, actions),
     );
-    li.dataset['index'] = String(index);
-    return li;
   }
 }

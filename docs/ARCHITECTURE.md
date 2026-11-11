@@ -87,6 +87,10 @@ Se revisarán cuando llegue el DWG real.
   nombre con `'''` no puede inyectar código) y las orientaciones ya calculadas con el `lookAt`
   de Three.js, para que el giro de la cámara coincida con el visor. Acepta `--report`, que usa el test
   de integración que ejecuta Blender en modo sin ventana.
+- **Interfaz** (`viewer/src/ui`): componentes propios en TypeScript y CSS (`styles.css`, variables
+  CSS y `backdrop-filter`), sin framework ni lil-gui. Todo texto procedente del usuario o del DWG se
+  asigna con `textContent`; `innerHTML` solo se usa con SVG constantes (`icons.ts`). La lógica
+  testeable (cubo de orientación, amanecer y ocaso, progreso de descarga) vive fuera del DOM.
 - **Coordenadas**: el lector trabaja en WCS (float64). El recentrado y el paso Z-up → Y-up
   `(x, y, z)_dwg → (x, z, -y)_gltf` se hacen solo al exportar.
 
@@ -127,5 +131,5 @@ Se revisarán cuando llegue el DWG real.
 |---|---|
 | suncalc 1.9.0 | Posición solar (la versión clásica, la que encaja con `@types/suncalc` 1.9.2) |
 | @types/node (dev) | Tipos para los tests de integración (Blender, py_compile, gltf-validator) |
-| lil-gui 0.21 | Panel de control ligero; pone los nombres con `textContent`, así que los nombres de capa del DWG no son un riesgo de inyección |
+
 TypeScript se fija en 6.0.x porque `typescript-eslint` 8.x aún no admite TS 7.

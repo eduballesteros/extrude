@@ -1,27 +1,87 @@
+import type { Vector3 } from 'three';
 import type { PickInfo } from '../scene/picking';
+import { button, h } from './dom';
 
-/** Panel con los metadatos del objeto seleccionado. Solo textContent: los datos vienen del DWG. */
+const KIND_LABEL: Record<string, string> = {
+  building: 'Edificio',
+  road: 'Vial',
+  water: 'Agua',
+  vegetation: 'Vegetación',
+  terrain: 'Terreno',
+  line: 'Líneas',
+};
+
+/** Campos destacados (en este orden) y el resto como detalles. */
+const HIGHLIGHT = ['Altura (m)', 'Plantas', 'Cota base (m)'];
+
+/**
+ * Tarjeta de inspección del objeto seleccionado. Solo textContent: los datos vienen del DWG.
+ */
 export class InfoPanel {
-  readonly element = document.createElement('aside');
+  readonly element = h('aside', {
+    class: 'inspect-card',
+    hidden: true,
+    attrs: { 'aria-live': 'polite' },
+  });
+  private point: Vector3 | null = null;
 
-  constructor() {
-    this.element.className = 'info';
-    this.element.hidden = true;
-  }
+  constructor(private readonly onFocus: (point: Vector3) => void) {}
 
   show(info: PickInfo): void {
-    this.element.replaceChildren();
-    const title = document.createElement('h3');
-    title.textContent = info.layer ? `${info.layer} · ${info.kind ?? ''}` : 'Sin capa';
-    const list = document.createElement('dl');
+    this.point = info.point.clone();
+    const values = new Map(info.fields);
+    const stat = (label: string, short: string): HTMLElement | null => {
+      const value = values.get(label);
+      return value && value !== '—'
+        ? h(
+            'div',
+            { class: 'stat' },
+            h('span', { class: 'stat-value', textContent: value }),
+            h('span', { class: 'stat-label', textContent: short }),
+          )
+        : null;
+    };
+    const stats = [
+      stat('Altura (m)', 'altura m'),
+      stat('Plantas', 'plantas'),
+      stat('Cota base (m)', 'cota m'),
+    ].filter((s): s is HTMLElement => s !== null);
+    const details = h('dl', { class: 'details' });
     for (const [key, value] of info.fields) {
-      const dt = document.createElement('dt');
-      dt.textContent = key;
-      const dd = document.createElement('dd');
-      dd.textContent = value;
-      list.append(dt, dd);
+      if (HIGHLIGHT.includes(key)) continue;
+      details.append(h('dt', { textContent: key }), h('dd', { textContent: value }));
     }
-    this.element.append(title, list);
+    const close = button({
+      icon: 'close',
+      title: 'Cerrar',
+      variant: 'ghost',
+      size: 'sm',
+      onClick: () => this.hide(),
+    });
+    const focus = button({
+      label: 'Enfocar',
+      icon: 'focus',
+      variant: 'primary',
+      size: 'sm',
+      onClick: () => this.point && this.onFocus(this.point),
+    });
+    this.element.replaceChildren(
+      h(
+        'header',
+        {},
+        h('span', { class: 'kind-dot', data: { kind: info.kind ?? 'unknown' } }),
+        h(
+          'div',
+          { class: 'inspect-title' },
+          h('strong', { textContent: info.layer ?? 'Sin capa' }),
+          h('span', { textContent: KIND_LABEL[info.kind ?? ''] ?? info.kind ?? '' }),
+        ),
+        close,
+      ),
+      stats.length ? h('div', { class: 'stats-row' }, ...stats) : '',
+      h('details', { class: 'advanced' }, h('summary', { textContent: 'Detalles' }), details),
+      h('footer', {}, focus),
+    );
     this.element.hidden = false;
   }
 

@@ -13,8 +13,14 @@ import { Ground } from './scene/ground';
 import { LayerManager } from './scene/layers';
 import { SceneLighting } from './scene/lighting';
 import { ExtraLights, newLightState } from './scene/lights';
-import { type LoadedModel, loadFromFile, loadFromUrl } from './scene/loader';
-import { boundsOf, Navigation } from './scene/navigation';
+import {
+  type LoadedModel,
+  loadFromFile,
+  loadFromUrl,
+  nextFrame,
+  type ProgressCallback,
+} from './scene/loader';
+import { boundsOf, Navigation, type ViewPreset } from './scene/navigation';
 import { describeHit, firstVisibleHit } from './scene/picking';
 import { composeIso, splitIso } from './scene/sun';
 import { defaultState, type LightType, type Vec3, type ViewerState } from './state';
@@ -34,6 +40,16 @@ export interface DayAnimation {
 
 type Listener = () => void;
 
+export type NoticeKind = 'info' | 'success' | 'warning' | 'error';
+
+/** Evento global de avisos (lo muestra el sistema de toasts). */
+export const NOTICE_EVENT = 'extrude:notice';
+
+export interface Notice {
+  message: string;
+  kind: NoticeKind;
+}
+
 export class App {
   readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
@@ -43,7 +59,7 @@ export class App {
   readonly lighting: SceneLighting;
   readonly layers = new LayerManager();
   readonly lights: ExtraLights;
-  readonly info = new InfoPanel();
+  readonly info: InfoPanel;
   readonly ground = new Ground();
   readonly stats: StatsOverlay;
   model: LoadedModel | null = null;
@@ -82,9 +98,10 @@ export class App {
       (id, position) => this.moveLight(id, position),
     );
     this.stats = new StatsOverlay(this.renderer);
+    this.info = new InfoPanel((point) => this.nav.focus(point));
     this.raycaster.params.Line = { threshold: LINE_PICK_THRESHOLD_M };
     this.scene.add(this.ground.mesh);
-    document.body.append(this.stats.element, this.info.element);
+    container.append(this.info.element);
 
     this.bindPointer();
     window.addEventListener('resize', () => this.resize());
@@ -93,10 +110,13 @@ export class App {
     this.renderer.setAnimationLoop((now: number) => this.frame(now));
   }
 
-  /** Mensaje breve en la barra de estado. */
-  notify(message: string): void {
-    const status = document.querySelector('#status');
-    if (status) status.textContent = message;
+  /** Aviso breve para el usuario (toast). */
+  notify(message: string, kind: NoticeKind = 'info'): void {
+    window.dispatchEvent(new CustomEvent<Notice>(NOTICE_EVENT, { detail: { message, kind } }));
+  }
+
+  get hasModel(): boolean {
+    return this.model !== null;
   }
 
   on(event: keyof App['listeners'], listener: Listener): void {
@@ -108,11 +128,30 @@ export class App {
   }
 
   /** `name` identifica el modelo (vistas guardadas, script de Blender); por defecto, el archivo. */
-  async load(source: string | File, name?: string): Promise<LoadedModel> {
+  async load(
+    source: string | File,
+    name?: string,
+    onProgress?: ProgressCallback,
+  ): Promise<LoadedModel> {
     const model =
-      typeof source === 'string' ? await loadFromUrl(source, name) : await loadFromFile(source);
+      typeof source === 'string'
+        ? await loadFromUrl(source, name, onProgress)
+        : await loadFromFile(source, onProgress);
+    onProgress?.('prepare', null);
+    await nextFrame();
     this.setModel(model);
     return model;
+  }
+
+  /** Reproduce o pausa la animación del día (y avisa a la interfaz). */
+  setPlaying(playing: boolean): void {
+    this.animation.playing = playing;
+    this.emit('state');
+  }
+
+  /** Lleva la cámara a una vista estándar (planta, alzados, isométrica). */
+  viewFrom(preset: ViewPreset): void {
+    this.nav.viewFrom(preset);
   }
 
   async loadHdri(file: File): Promise<void> {
@@ -281,6 +320,7 @@ export class App {
   private frame(now: number): void {
     const dt = Math.min((now - this.lastFrame) / 1000, 0.1);
     this.lastFrame = now;
+    if (!this.model) return; // sin modelo no se dibuja nada: la pantalla de inicio lo cubre
     if (this.animation.playing && this.state.sun.mode === 'datetime') {
       this.setHours(splitIso(this.state.sun.isoDate).hours + this.animation.hoursPerSecond * dt);
       this.emit('state');
@@ -329,6 +369,7 @@ export class App {
     if (s.ambient.background === 'hdri' && s.ambient.hdri !== this.hdriName) {
       this.notify(
         `La vista usa el HDRI "${s.ambient.hdri ?? '?'}": cárgalo en Entorno para verlo.`,
+        'warning',
       );
     }
     this.lights.select(null);

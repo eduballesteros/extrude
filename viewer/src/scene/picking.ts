@@ -28,6 +28,8 @@ function format(value: unknown): string {
 
 const FIELD_LABELS: Record<string, string> = {
   height: 'Altura (m)',
+  floors: 'Plantas',
+  base: 'Cota base (m)',
   height_origin: 'Origen de la altura',
   source_type: 'Tipo DXF',
   handle: 'Handle',

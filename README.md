@@ -114,26 +114,24 @@ tamaño (`--max-mb`) y conserva los 10 últimos trabajos.
 just dev                # http://localhost:5173
 ```
 
-Para abrir un modelo:
-- arrastra un `.glb` a la ventana;
-- usa el selector de archivo;
-- o abre `http://localhost:5173/?model=/models/x.glb`, con el archivo en `viewer/public/models/`.
+**Pantalla de inicio.** Sin modelo cargado solo se ve el hub:
+- zona de arrastre para `.dwg`/`.dxf` (con `just serve`), `.glb`/`.gltf` y, opcionalmente, el `.yaml` del proyecto;
+- botón *Examinar equipo*;
+- tres ejemplos de un clic (`viewer/public/models/`, genéralos con `just convert-samples`);
+- barra de progreso real: descarga en %, carga de geometría y sombras.
 
-Añade `&debug` a la URL para tener la app en `window.__extrude` desde la consola.
+Al terminar, el hub se desvanece y aparece el espacio de trabajo. *Abrir* (barra superior) lo vuelve a mostrar.
 
-| Función | Cómo |
+| Zona | Contenido |
 |---|---|
-| Navegar | Órbita con el ratón. Vuelo: botón "Vuelo", luego WASD, Q/E para bajar/subir, Shift para ir rápido y Esc para salir. Proyección perspectiva u ortográfica, FOV ajustable. |
-| Centrar | Doble clic sobre un objeto |
-| Información | Clic sobre un objeto: capa, altura, de dónde sale la altura, tipo DXF, handle, bloque e instancia |
-| Capas | Panel "Capas": visible, color, aislar, mostrar todas |
-| Sol | Por fecha, hora local, UTC±, latitud y longitud (suncalc) o manual (azimut y elevación). También rotación del norte, intensidad, temperatura de color y animación del día |
-| Sombras | Ajuste automático a toda la escena o, si mide más de 1,5 km, a la zona visible. Resolución, filtro PCF o VSM, suavizado, bias y normal bias |
-| Entorno | Cielo procedural, HDRI (`.hdr`/`.exr`) con rotación e intensidad, o color liso. Suelo opcional que recibe sombras |
-| Luces | Puntuales, focos y de área: se colocan con un clic en la escena y se mueven con un gizmo. Se editan desde el panel |
-| Render | Tone mapping AgX, ACES, Neutral o ninguno; exposición |
-| Rendimiento | Abajo a la izquierda: FPS, triángulos y draw calls |
+| Barra superior | Modelo y su origen UTM/CRS, *Abrir*, perspectiva/ortográfica, *Encuadrar* (F), menú *Exportar* (PNG, Blender, views.json, GLB con cámaras y luces, importar vistas, resultados de la conversión), modo zen (Tab) |
+| Panel izquierdo | **Vistas**: formato de render, marco de encuadre, tarjetas con miniatura (restaurar, renombrar, actualizar, duplicar, reordenar, borrar). **Capas**: buscador, visibilidad, color, aislar, triángulos |
+| Panel derecho | **Sol** (línea de tiempo 0–24 h con amanecer y ocaso, ▶ reproducir, fecha, zona horaria, coordenadas, modo manual, norte real) · **Sombras** (No / Media 2K / Alta 4K, suavizado, avanzado) · **Entorno** (cielo, color o HDRI; suelo) · **Cámara y render** (FOV, tone mapping, exposición, vuelo) · **Luces** |
+| Sobre la vista | Cubo de orientación (planta, alzados N/S/E/O, ISO) con aguja del norte real · píldora de FPS, triángulos y draw calls · tarjeta del objeto pulsado (altura, plantas, cota, capa, *Enfocar*) · avisos |
 
+Atajos: **F** encuadrar · **N** nueva vista · **Espacio** reproducir el día · **Tab** modo zen ·
+**Esc** cerrar el hub · doble clic: centrar en un punto. `?debug` expone la app en
+`window.__extrude`.
 ### Vistas y exportación
 
 El panel **Vistas** (a la izquierda) permite:

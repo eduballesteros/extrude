@@ -21,6 +21,11 @@ export interface LoadedModel {
   bytes: ArrayBuffer;
 }
 
+export type LoadStage = 'download' | 'read' | 'parse' | 'prepare';
+
+/** `fraction` en [0, 1], o null si no se puede medir (fase indeterminada). */
+export type ProgressCallback = (stage: LoadStage, fraction: number | null) => void;
+
 const DRACO_PATH = `${import.meta.env.BASE_URL}draco/`;
 
 function createLoader(): GLTFLoader {
@@ -34,20 +39,64 @@ function toModel(gltf: GLTF, name: string, bytes: ArrayBuffer): LoadedModel {
   return { root: gltf.scene, extras, name, bytes };
 }
 
-async function parse(bytes: ArrayBuffer, name: string): Promise<LoadedModel> {
+/** Cede un fotograma para que la interfaz pinte el estado antes de una tarea pesada. */
+export function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function parse(
+  bytes: ArrayBuffer,
+  name: string,
+  onProgress?: ProgressCallback,
+): Promise<LoadedModel> {
+  onProgress?.('parse', null);
+  await nextFrame();
   const gltf = await createLoader().parseAsync(bytes, '');
   return toModel(gltf, name, bytes);
 }
 
-export async function loadFromUrl(url: string, name?: string): Promise<LoadedModel> {
+/**
+ * Descarga leyendo el cuerpo por fragmentos para informar del progreso real
+ * (si el servidor envía Content-Length; si no, la fase es indeterminada).
+ */
+export async function download(url: string, onProgress?: ProgressCallback): Promise<ArrayBuffer> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status} al descargar ${url}`);
-  return parse(
-    await response.arrayBuffer(),
-    name ?? decodeURIComponent(url.split('/').pop() ?? url),
-  );
+  const total = Number(response.headers.get('Content-Length')) || 0;
+  if (!response.body) return response.arrayBuffer();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  onProgress?.('download', total ? 0 : null);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onProgress?.('download', total ? Math.min(received / total, 1) : null);
+  }
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes.buffer;
 }
 
-export async function loadFromFile(file: File): Promise<LoadedModel> {
-  return parse(await file.arrayBuffer(), file.name);
+export async function loadFromUrl(
+  url: string,
+  name?: string,
+  onProgress?: ProgressCallback,
+): Promise<LoadedModel> {
+  const bytes = await download(url, onProgress);
+  return parse(bytes, name ?? decodeURIComponent(url.split('/').pop() ?? url), onProgress);
+}
+
+export async function loadFromFile(
+  file: File,
+  onProgress?: ProgressCallback,
+): Promise<LoadedModel> {
+  onProgress?.('read', null);
+  return parse(await file.arrayBuffer(), file.name, onProgress);
 }

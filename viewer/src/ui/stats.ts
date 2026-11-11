@@ -1,18 +1,27 @@
 import type { WebGLRenderer } from 'three';
+import { formatNumber, h } from './dom';
 
 const SAMPLE_WINDOW_MS = 1000;
 
-/** Indicador de FPS (media por segundo), triángulos y draw calls del último fotograma. */
+/** Píldora discreta con FPS (media por segundo), triángulos y draw calls del último fotograma. */
 export class StatsOverlay {
   readonly element: HTMLElement;
+  private readonly fpsEl = h('span', { class: 'stat-fps' });
+  private readonly triEl = h('span');
+  private readonly callsEl = h('span');
   private frames = 0;
   private windowStart = performance.now();
-  private fps = 0;
 
   constructor(private readonly renderer: WebGLRenderer) {
-    this.element = document.createElement('div');
-    this.element.className = 'stats';
-    this.element.setAttribute('data-testid', 'stats');
+    this.element = h(
+      'div',
+      { class: 'stats-pill', data: { testid: 'stats' } },
+      this.fpsEl,
+      h('span', { class: 'sep' }),
+      this.triEl,
+      h('span', { class: 'sep' }),
+      this.callsEl,
+    );
   }
 
   /** Llamar una vez por fotograma, después de renderizar. */
@@ -20,13 +29,16 @@ export class StatsOverlay {
     this.frames += 1;
     const elapsed = now - this.windowStart;
     if (elapsed < SAMPLE_WINDOW_MS) return;
-    this.fps = (this.frames * 1000) / elapsed;
+    const fps = (this.frames * 1000) / elapsed;
     this.frames = 0;
     this.windowStart = now;
     const { triangles, calls } = this.renderer.info.render;
-    this.element.dataset['fps'] = this.fps.toFixed(1);
+    this.element.dataset['fps'] = fps.toFixed(1);
     this.element.dataset['triangles'] = String(triangles);
     this.element.dataset['calls'] = String(calls);
-    this.element.textContent = `${this.fps.toFixed(0)} FPS · ${triangles.toLocaleString('es-ES')} tri · ${calls} draw calls`;
+    this.fpsEl.textContent = `${fps.toFixed(0)} FPS`;
+    this.fpsEl.classList.toggle('is-low', fps < 30);
+    this.triEl.textContent = `${formatNumber(triangles)} tri`;
+    this.callsEl.textContent = `${calls} draw calls`;
   }
 }
