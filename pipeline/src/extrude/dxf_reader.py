@@ -49,6 +49,10 @@ from extrude.model import (
 
 DEFAULT_FLATTEN_TOLERANCE_M = 0.01
 MAX_FAILURE_WARNINGS = 20
+# Vértice repetido (cierre de un contorno, 3DFACE triangular): en el DXF es una copia exacta.
+# Tolerancia ABSOLUTA en unidades del dibujo: la relativa de np.allclose (1e-5) vale ~5 m en
+# coordenadas UTM y fundía vértices reales (una cara de 3 m perdía la mitad de su superficie).
+COINCIDENT_EPS = 1e-9
 
 UNSUPPORTED_ACIS = frozenset(
     {
@@ -150,6 +154,10 @@ def _bbox(features: list[Feature]) -> BBox | None:
             case TextFeature(position=p) | PointFeature(position=p):
                 arrays.append(p.reshape(1, 3))
     return BBox.of(np.vstack(arrays)) if arrays else None
+
+
+def _same_point(a: Points, b: Points) -> bool:
+    return bool(np.allclose(a, b, rtol=0.0, atol=COINCIDENT_EPS))
 
 
 def _to_array(vertices: Iterable[Vec3]) -> Points:
@@ -270,7 +278,7 @@ class _Walker:
         loops = []
         for boundary in ezpath.from_hatch(entity):
             points = _to_array(boundary.flattening(self.tolerance))
-            if len(points) > 1 and np.allclose(points[0], points[-1]):
+            if len(points) > 1 and _same_point(points[0], points[-1]):
                 points = points[:-1]
             if len(points) >= 3:
                 loops.append(points)
@@ -278,7 +286,7 @@ class _Walker:
 
     def _face(self, entity: DXFGraphic, layer: str, ctx: _Context) -> None:
         vertices = _to_array(entity.wcs_vertices())  # type: ignore[attr-defined]
-        if len(vertices) == 4 and np.allclose(vertices[2], vertices[3]):
+        if len(vertices) == 4 and _same_point(vertices[2], vertices[3]):
             vertices = vertices[:3]  # cuadrilátero que en realidad es triángulo
         face = tuple(range(len(vertices)))
         self._emit(MeshFeature(layer, vertices, (face,), self._source(entity, ctx)))

@@ -188,3 +188,34 @@ def test_garbage_file(tmp_path: Path) -> None:
     path.write_bytes(b"\x00\x01 esto no es un dxf")
     with pytest.raises(InputFileError, match="no es un DXF"):
         read_dxf(path)
+
+
+@pytest.mark.parametrize("origin", [(0.0, 0.0), (500_000.0, 4_140_000.0), (5e6, 5e6)])
+def test_small_3dface_keeps_its_four_corners_at_any_coordinate(
+    tmp_path: Path, origin: tuple[float, float]
+) -> None:
+    """Una cara de 3 m en coordenadas UTM no debe fundir sus vértices 3 y 4 (rtol de allclose)."""
+    x, y = origin
+    doc = ezdxf.new("R2018")
+    corners = [(x, y, 0), (x + 3, y, 0), (x + 3, y + 3, 0), (x, y + 3, 0)]
+    doc.modelspace().add_3dface(corners, dxfattribs={"layer": "F"})
+    path = tmp_path / "face.dxf"
+    doc.saveas(path)
+    (face,) = [f for f in read_dxf(path).features if isinstance(f, MeshFeature)]
+    assert len(face.vertices) == 4
+    xy = face.vertices[:, :2] - [x, y]
+    area = 0.5 * abs(
+        np.dot(xy[:, 0], np.roll(xy[:, 1], -1)) - np.dot(xy[:, 1], np.roll(xy[:, 0], -1))
+    )
+    assert area == pytest.approx(9.0)
+
+
+def test_triangular_3dface_still_drops_the_repeated_corner(tmp_path: Path) -> None:
+    x, y = 500_000.0, 4_140_000.0
+    doc = ezdxf.new("R2018")
+    doc.modelspace().add_3dface([(x, y, 0), (x + 3, y, 0), (x, y + 3, 0), (x, y + 3, 0)])
+    path = tmp_path / "tri.dxf"
+    doc.saveas(path)
+    (face,) = [f for f in read_dxf(path).features if isinstance(f, MeshFeature)]
+    assert len(face.vertices) == 3
+    assert face.faces == ((0, 1, 2),)

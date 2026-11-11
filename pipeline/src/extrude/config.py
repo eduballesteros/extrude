@@ -26,6 +26,8 @@ from extrude.model import LengthUnit
 
 DEFAULT_FLOOR_HEIGHT_M = 3.0
 DEFAULT_TOLERANCE_M = 0.01
+# Textos de altura con el punto de inserción justo fuera de la fachada (ver heights.TextIndex.near)
+DEFAULT_TEXT_TOLERANCE_M = 1.0
 DEFAULT_INSTANCING_MIN = 10
 HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -100,6 +102,7 @@ class LayerRule(_Strict):
     attribute: str | None = None
     text_regex: str = r"(\d+)\s*P"
     text_layers: list[str] | None = None
+    text_tolerance: NonNegative = DEFAULT_TEXT_TOLERANCE_M
     value_means: ValueMeaning = ValueMeaning.FLOORS
     floor_offset: int = 0
     height: NonNegative | None = None
@@ -109,6 +112,8 @@ class LayerRule(_Strict):
     block_values: dict[str, float] = Field(default_factory=dict)
     base_elevation: float = 0.0
     base_from_elevation: bool = False
+    base_from_terrain: bool = False
+    terrain_support: Literal["foundation", "minimum"] = "foundation"
     detect_holes: bool = True
     bottom_cap: bool = False
     material: Material | None = None
@@ -131,6 +136,8 @@ class LayerRule(_Strict):
             raise ValueError("height_from: attribute requiere 'attribute' (etiqueta del ATTRIB)")
         if self.height_from is HeightSource.BLOCK and not self.block_values:
             raise ValueError("height_from: block requiere 'block_values' {nombre de bloque: valor}")
+        if self.base_from_elevation and self.base_from_terrain:
+            raise ValueError("base_from_elevation y base_from_terrain son excluyentes: elige uno")
         if any(v < 0 for v in self.block_values.values()):
             raise ValueError("block_values no admite valores negativos")
         return self

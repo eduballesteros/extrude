@@ -155,7 +155,7 @@ def _best_text_pattern(
 
 
 def _building_rule(
-    layer: str, info: _LayerInfo, all_texts: list[TextFeature]
+    layer: str, info: _LayerInfo, all_texts: list[TextFeature], *, has_terrain: bool = False
 ) -> tuple[dict[str, Any], list[str]]:
     texts = _texts_inside(info, all_texts)
     rule: dict[str, Any] = {"match": _glob_escape(layer), "kind": Kind.BUILDING.value}
@@ -189,7 +189,7 @@ def _building_rule(
         notes.append("Las polilíneas tienen cota Z: se usa como altura de coronación.")
     else:
         notes.append("No se encontró altura en el dibujo: se usa default_height.")
-    if info.has_elevation and rule.get("height_from") != "elevation":
+    if info.has_elevation and rule.get("height_from") != "elevation" and not has_terrain:
         rule["base_from_elevation"] = True
         notes.append("Las plantas tienen cota Z: se usa como cota de la base de cada edificio.")
     rule["floor_height"] = 3.0
@@ -204,13 +204,18 @@ def _material(kind: Kind) -> dict[str, Any]:
 
 def draft_config(read: ReadResult, display_name: str | None = None) -> str:
     layers, texts = _collect(read)
+    terrain_layers = [
+        name
+        for name, info in sorted(layers.items())
+        if _guess_kind(name) is Kind.TERRAIN and (info.has_elevation or info.has_points)
+    ]
     blocks: list[str] = []
     for layer, info in sorted(layers.items()):
         kind = _guess_kind(layer)
         counts = ", ".join(f"{t}×{n}" for t, n in sorted(info.geometry.items()))
         notes = [f"Capa {layer}: {counts}"]
         if kind is Kind.BUILDING:
-            rule, extra = _building_rule(layer, info, texts)
+            rule, extra = _building_rule(layer, info, texts, has_terrain=bool(terrain_layers))
             notes += extra
         else:
             if kind is Kind.TERRAIN and not (info.has_elevation or info.has_points):
@@ -226,6 +231,21 @@ def draft_config(read: ReadResult, display_name: str | None = None) -> str:
                 notes.append(f"Bloques de árbol ({listed}): volumen de {TREE_BLOCK_HEIGHT_M:g} m.")
             if kind is Kind.IGNORE:
                 notes.append("Nombre no reconocido: revisa si debe ser building/road/water/…")
+        if (
+            terrain_layers
+            and kind not in (Kind.IGNORE, Kind.TERRAIN, Kind.LINE)
+            and not rule.get("base_from_elevation")
+            and rule.get("height_from") != "elevation"
+        ):
+            rule["base_from_terrain"] = True
+            on = ", ".join(terrain_layers)
+            if kind is Kind.BUILDING and info.has_elevation:
+                notes.append(
+                    "La presencia de cotas Z no garantiza bases fiables en toda la capa: "
+                    f"se apoya en el terreno ({on})."
+                )
+            else:
+                notes.append(f"Sin cota de base propia: se apoya en el terreno ({on}).")
         if kind is not Kind.IGNORE:
             rule["material"] = _material(kind)
         blocks.append(_render_rule(rule, notes))

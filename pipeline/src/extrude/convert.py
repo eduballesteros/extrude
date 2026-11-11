@@ -7,7 +7,7 @@ import math
 import tempfile
 import time
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +20,9 @@ from extrude.build import BuildResult, LineObject, SceneObject, build_scene
 from extrude.config import Config
 from extrude.converters import ensure_dxf
 from extrude.dxf_reader import read_dxf
+from extrude.errors import ExtrudeError
+from extrude.extrusion import box_corners
+from extrude.geodesy import to_wgs84
 from extrude.gltf_export import ExportLayer, GlbStats, SceneInfo, build_glb
 from extrude.instancing import InstanceGroup, plan_instances, transform
 from extrude.model import METERS_PER_UNIT, LengthUnit, ReadResult
@@ -39,6 +42,8 @@ class ConvertOptions:
     tile_size: float | None = None
     compression: Compression | None = None
     units_override: LengthUnit | None = None
+    # Se llama al empezar cada fase (dwg_to_dxf, read, build…): progreso para extrude serve
+    on_phase: Callable[[str], None] | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -61,18 +66,25 @@ class ConvertResult:
 
 
 class _Timer:
-    def __init__(self) -> None:
+    def __init__(self, on_phase: Callable[[str], None] | None = None) -> None:
         self.timings: dict[str, float] = {}
+        self.on_phase = on_phase
 
     @contextmanager
     def phase(self, name: str) -> Iterator[None]:
+        if self.on_phase is not None:
+            self.on_phase(name)
         start = time.perf_counter()
         yield
         self.timings[name] = round(time.perf_counter() - start, 3)
 
 
 def convert(source: Path, options: ConvertOptions) -> ConvertResult:
-    timer = _Timer()
+    if options.tile_size is not None and (
+        not math.isfinite(options.tile_size) or options.tile_size <= 0
+    ):
+        raise ExtrudeError("El tamaño de tesela debe ser finito y > 0.", "Ejemplo: --tiles 500.")
+    timer = _Timer(options.on_phase)
     config = options.config
     options.out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="extrude-") as workdir:
@@ -87,7 +99,20 @@ def convert(source: Path, options: ConvertOptions) -> ConvertResult:
     with timer.phase("instancing"):
         layers = _export_layers(build, config, scale)
     origin = _origin(layers) if config.recenter else (0.0, 0.0, 0.0)
-    info = SceneInfo(origin=origin, source_units=read.units.value, crs=config.crs)
+    center = _center_xy(layers)
+    geographic = to_wgs84(config.crs, *center) if center else None
+    if config.crs and center and geographic is None:
+        build.warnings.append(
+            f"No se pudo geolocalizar el centro con {config.crs}: "
+            "revisa el CRS y las coordenadas. Se exporta el modelo sin ubicación solar."
+        )
+    info = SceneInfo(
+        origin=origin,
+        source_units=read.units.value,
+        crs=config.crs,
+        center_lat=geographic[0] if geographic else None,
+        center_lon=geographic[1] if geographic else None,
+    )
 
     with timer.phase("export"):
         if options.tile_size:
@@ -123,6 +148,7 @@ def _export_layers(build: BuildResult, config: Config, scale: float) -> list[Exp
                 groups=groups,
                 lines=geometry.lines,
                 source_entities=dict(geometry.stats.features),
+                ground_check=geometry.stats.ground.as_dict() if geometry.stats.ground else None,
             )
         )
     return layers
@@ -134,22 +160,28 @@ def _bounds(layers: list[ExportLayer]) -> tuple[NDArray[np.float64], NDArray[np.
         points.extend(o.mesh.vertices for o in layer.objects if len(o.mesh.vertices))
         points.extend(line.points for line in layer.lines)
         for group in layer.groups:
-            lo, hi = group.prototype.vertices.min(axis=0), group.prototype.vertices.max(axis=0)
+            corners = box_corners(group.prototype.vertices)
             for matrix in group.matrices:
-                points.append(transform(np.array([lo, hi]), matrix))
+                points.append(transform(corners, matrix))
     if not points:
         return None
     stacked = np.vstack(points)
     return stacked.min(axis=0), stacked.max(axis=0)
 
 
-def _origin(layers: list[ExportLayer]) -> tuple[float, float, float]:
-    """Centro XY del bbox en metros (float64); Z = 0 para conservar las cotas absolutas."""
+def _center_xy(layers: list[ExportLayer]) -> tuple[float, float] | None:
+    """Centro XY del bbox en metros (float64), en coordenadas del dibujo (sin recentrar)."""
     bounds = _bounds(layers)
     if bounds is None:
-        return (0.0, 0.0, 0.0)
+        return None
     center = (bounds[0] + bounds[1]) / 2
-    return (float(center[0]), float(center[1]), 0.0)
+    return (float(center[0]), float(center[1]))
+
+
+def _origin(layers: list[ExportLayer]) -> tuple[float, float, float]:
+    """Centro XY del bbox; Z = 0 para conservar las cotas absolutas."""
+    center = _center_xy(layers)
+    return (*center, 0.0) if center else (0.0, 0.0, 0.0)
 
 
 def _write(layers: list[ExportLayer], info: SceneInfo, path: Path) -> OutputFile:
@@ -197,7 +229,10 @@ def _write_tiles(
     def bucket(tile: TileKey, layer: ExportLayer) -> ExportLayer:
         if layer.name not in tiles[tile]:
             tiles[tile][layer.name] = ExportLayer(
-                layer.name, layer.rule, source_entities=layer.source_entities
+                layer.name,
+                layer.rule,
+                source_entities=layer.source_entities,
+                ground_check=layer.ground_check,  # de la capa completa, no de la tesela
             )
         return tiles[tile][layer.name]
 
@@ -251,6 +286,8 @@ def _write_manifest(outputs: list[OutputFile], info: SceneInfo, out_dir: Path, s
         "origin_offset": list(info.origin),
         "units": "m",
         "crs": info.crs,
+        "center_lat": info.center_lat,
+        "center_lon": info.center_lon,
         "tile_size": size,
         "tiles": [
             {

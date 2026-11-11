@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import json
+import math
+import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -30,6 +33,7 @@ app = typer.Typer(
 )
 
 USER_ERROR_EXIT = 2
+TOLERANT_ERRORS = ("replace", "backslashreplace", "xmlcharrefreplace", "ignore")
 
 
 @contextmanager
@@ -41,9 +45,20 @@ def _user_errors() -> Iterator[None]:
         raise typer.Exit(USER_ERROR_EXIT) from exc
 
 
+def _tolerant_console() -> None:
+    """Las consolas de Windows (cp1252) no codifican →, ², etc.: sin esto, `typer.echo` lanza
+    UnicodeEncodeError después de convertir y el comando sale con error aunque todo se escribió.
+    Se sustituye lo que no se pueda codificar en vez de fallar."""
+    for stream in (sys.stdout, sys.stderr):
+        # "strict" en consola y "surrogateescape" al redirigir: ambos fallan con →
+        if isinstance(stream, io.TextIOWrapper) and stream.errors not in TOLERANT_ERRORS:
+            stream.reconfigure(errors="replace")
+
+
 @app.callback()
 def main() -> None:
     """Extrude: convierte DWG/DXF urbanos en modelos 3D glTF."""
+    _tolerant_console()
 
 
 @app.command()
@@ -97,8 +112,8 @@ def convert(
 ) -> None:
     """Convierte el dibujo a GLB (metros, Y-up, recentrado) y escribe report.md/json."""
     with _user_errors():
-        if tiles is not None and tiles <= 0:
-            raise ExtrudeError("--tiles debe ser > 0.", "Ejemplo: --tiles 500 (metros).")
+        if tiles is not None and (not math.isfinite(tiles) or tiles <= 0):
+            raise ExtrudeError("--tiles debe ser finito y > 0.", "Ejemplo: --tiles 500 (metros).")
         options = ConvertOptions(load_config(config), out, tiles, compress, units)
         result = run_convert(source, options)
     report = result.report

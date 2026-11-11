@@ -8,6 +8,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
+import ezdxf
 import numpy as np
 import pytest
 import sample_dxf as s
@@ -99,6 +100,75 @@ def test_recentering_removes_utm_jitter(utm: tuple[ConvertResult, Glb]) -> None:
     error = np.abs(restored - original).max()
     assert error < 1e-4  # < 0,1 mm
     assert error < FLOAT32_AT_UTM_M / 1000
+
+
+SAMPLE_CENTER_WGS84 = (37.367608861, -6.048517018)  # pyproj: EPSG:25830 (230032.5, 4140015.0)
+
+
+@pytest.mark.parametrize("recenter", [True, False])
+def test_utm_crs_gives_geographic_center(samples_dir: Path, tmp_path: Path, recenter: bool) -> None:
+    config = load_config(CONFIGS / "block_2d.yaml").model_copy(
+        update={"crs": "EPSG:25830", "recenter": recenter}
+    )
+    convert(samples_dir / "block_2d_utm.dxf", ConvertOptions(config, tmp_path, tile_size=40))
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    tile = Glb(next((tmp_path / "tiles").glob("*.glb")))
+    for extras in (tile.extras, manifest):
+        assert extras["center_lat"] == pytest.approx(SAMPLE_CENTER_WGS84[0], abs=1e-8)
+        assert extras["center_lon"] == pytest.approx(SAMPLE_CENTER_WGS84[1], abs=1e-8)
+
+
+def test_without_crs_there_is_no_geographic_center(utm: tuple[ConvertResult, Glb]) -> None:
+    _, glb = utm
+    assert glb.extras["crs"] is None
+    assert glb.extras["center_lat"] is None
+    assert glb.extras["center_lon"] is None
+
+
+def test_rotated_instance_bounds_match_the_original_drawing(tmp_path: Path) -> None:
+    doc = ezdxf.new()
+    doc.units = 6
+    block = doc.blocks.new("SQUARE")
+    block.add_lwpolyline([(0, 0), (10, 0), (10, 10), (0, 10)], close=True)
+    doc.modelspace().add_blockref("SQUARE", (0, 0), dxfattribs={"layer": "E", "rotation": 45})
+    doc.modelspace().add_blockref("SQUARE", (100, 0), dxfattribs={"layer": "E"})
+    source = tmp_path / "rotated.dxf"
+    doc.saveas(source)
+    bbox = read_dxf(source).bbox
+    assert bbox is not None
+    config = parse_config(
+        {"instancing_min": 2, "layers": [{"match": "E", "kind": "building", "height": 3}]}
+    )
+    result = convert(source, ConvertOptions(config, tmp_path / "out"))
+    assert result.outputs[0].stats.instances == 2
+    expected = (np.asarray(bbox.min) + np.asarray(bbox.max)) / 2
+    assert result.origin[:2] == pytest.approx(expected[:2])
+
+
+def test_invalid_geolocation_does_not_prevent_export(tmp_path: Path) -> None:
+    doc = ezdxf.new()
+    doc.units = 6
+    doc.modelspace().add_lwpolyline(
+        [(1e12, 0), (1e12 + 10, 0), (1e12 + 10, 10), (1e12, 10)],
+        close=True,
+        dxfattribs={"layer": "E"},
+    )
+    source = tmp_path / "extreme.dxf"
+    doc.saveas(source)
+    config = parse_config(
+        {"crs": "EPSG:25830", "layers": [{"match": "E", "kind": "building", "height": 3}]}
+    )
+    result = convert(source, ConvertOptions(config, tmp_path / "out"))
+    assert Glb(result.outputs[0].path).extras["center_lat"] is None
+    assert any("geolocalizar" in w for w in result.report["warnings"])
+
+
+@pytest.mark.parametrize("size", [float("nan"), float("inf"), -float("inf"), 0, -1])
+def test_convert_rejects_nonfinite_or_nonpositive_tiles(tmp_path: Path, size: float) -> None:
+    from extrude.errors import ExtrudeError
+
+    with pytest.raises(ExtrudeError, match="finito"):
+        convert(tmp_path / "not-read.dxf", ConvertOptions(parse_config({}), tmp_path, size))
 
 
 def test_y_up_axis_and_heights(utm: tuple[ConvertResult, Glb]) -> None:
@@ -245,6 +315,16 @@ def test_cli_convert(samples_dir: Path, tmp_path: Path) -> None:
     assert bad.exit_code == USER_ERROR_EXIT
 
 
+@pytest.mark.parametrize("size", ["nan", "inf", "-inf"])
+def test_cli_rejects_nonfinite_tiles_before_reading(size: str, tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        app,
+        ["convert", "not-read.dxf", "-c", "not-read.yaml", "-o", str(tmp_path), f"--tiles={size}"],
+    )
+    assert result.exit_code == USER_ERROR_EXIT
+    assert "finito" in result.output
+
+
 def test_glb_magic(utm: tuple[ConvertResult, Glb]) -> None:
     result, _ = utm
     data = result.outputs[0].path.read_bytes()
@@ -283,3 +363,61 @@ def test_compression_keeps_ids_and_validates(
 def test_large_coordinates_detected_in_read(samples_dir: Path) -> None:
     bbox = read_dxf(samples_dir / "block_2d_utm.dxf").bbox
     assert bbox is not None and bbox.min[0] > 200_000
+
+
+def test_cli_survives_windows_console_encoding(
+    samples_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Consola cp1252 (Windows): el resumen lleva → y no debe tumbar el comando tras convertir."""
+    import io
+    import sys
+
+    from extrude.cli import _tolerant_console
+
+    for errors in ("strict", "surrogateescape"):
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors=errors)
+        monkeypatch.setattr(sys, "stdout", stream)
+        _tolerant_console()
+        print("OK: 1 GLB · 12 triángulos → out", end="")
+        stream.flush()
+        assert stream.buffer.getvalue() == "OK: 1 GLB · 12 triángulos ? out".encode("cp1252")
+
+
+@node_tools
+@pytest.mark.parametrize("out", [None, "salida relativa ñ"])
+@pytest.mark.parametrize("method", list(Compression))
+def test_cli_compression_with_relative_output(
+    samples_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    out: str | None,
+    method: Compression,
+) -> None:
+    """Node corre con cwd=tools/: las rutas relativas (también la salida por defecto `out`) deben
+    resolverse respecto a donde se ejecuta extrude, con espacios y caracteres no ASCII."""
+    workdir = tmp_path / "carpeta de trabajo ñ"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+    args = [
+        "convert",
+        str(samples_dir / "nested_blocks.dxf"),
+        "-c",
+        str(CONFIGS / "nested_blocks.yaml"),
+        "--compress",
+        method.value,
+    ]
+    if out is not None:
+        args += ["-o", out]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0, result.output
+    out_dir = workdir / (out or "out")
+    glb = out_dir / "model.glb"
+    assert glb.is_file()
+    assert not (out_dir / "model.raw.glb").exists()
+    extension = {
+        Compression.DRACO: "KHR_draco_mesh_compression",
+        Compression.MESHOPT: "EXT_meshopt_compression",
+    }[method]
+    assert extension in Glb(glb).doc.get("extensionsUsed", [])
+    (report,) = validate([Path(out or "out") / "model.glb"])  # ruta relativa también aquí
+    assert report["errors"] == 0, report["messages"]

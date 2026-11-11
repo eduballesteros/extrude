@@ -78,3 +78,112 @@ def test_cli_writes_file_and_refuses_overwrite(samples_dir: Path, tmp_path: Path
     assert again.exit_code == USER_ERROR_EXIT
     assert "--force" in again.output
     assert runner.invoke(app, [*args, "--force"]).exit_code == 0
+
+
+def test_draft_seats_layers_without_elevation_on_terrain(tmp_path: Path) -> None:
+    import ezdxf
+
+    doc = ezdxf.new("R2018")
+    msp = doc.modelspace()
+    for y in range(0, 50, 10):
+        msp.add_lwpolyline([(0, y), (50, y)], dxfattribs={"layer": "CURVAS", "elevation": y})
+    msp.add_lwpolyline([(5, 5), (9, 5), (9, 9)], close=True, dxfattribs={"layer": "ZONA VERDE"})
+    msp.add_lwpolyline([(20, 20), (30, 20), (30, 30)], close=True, dxfattribs={"layer": "EDIF"})
+    path = tmp_path / "t.dxf"
+    doc.saveas(path)
+    config = parse_config(yaml.safe_load(draft_config(read_dxf(path))))
+    by = {r.match: r for r in config.layers}
+    assert by["ZONA VERDE"].base_from_terrain
+    assert by["EDIF"].base_from_terrain
+    assert not by["CURVAS"].base_from_terrain
+
+
+def test_draft_with_contours_only_seats_buildings_on_terrain(tmp_path: Path) -> None:
+    """Curvas de nivel acotadas (Z = 50 y 100), sin puntos acotados, y edificios a Z = 0."""
+    import ezdxf
+
+    doc = ezdxf.new("R2018")
+    msp = doc.modelspace()
+    for i, z in enumerate((50.0, 100.0)):
+        msp.add_lwpolyline(
+            [(0, i * 20), (60, i * 20 + 5)], dxfattribs={"layer": "CURVAS", "elevation": z}
+        )
+    msp.add_lwpolyline(
+        [(10, 5), (20, 5), (20, 15), (10, 15)], close=True, dxfattribs={"layer": "EDIF"}
+    )
+    path = tmp_path / "curvas.dxf"
+    doc.saveas(path)
+    text = draft_config(read_dxf(path))
+    rules_by_match = {r.match: r for r in parse_config(yaml.safe_load(text)).layers}
+    assert rules_by_match["CURVAS"].kind is Kind.TERRAIN
+    assert rules_by_match["EDIF"].kind is Kind.BUILDING
+    assert rules_by_match["EDIF"].base_from_terrain
+    assert "base_from_terrain: true" in text
+
+
+@pytest.mark.parametrize("terrain_z", [-60.0, 20.0, None])
+@pytest.mark.parametrize("building_z", [(0.0, 35.0), (35.0, 35.0)])
+def test_draft_prefers_terrain_to_unverified_building_bases(
+    tmp_path: Path, terrain_z: float | None, building_z: tuple[float, float]
+) -> None:
+    import ezdxf
+
+    doc = ezdxf.new("R2018")
+    doc.units = 6  # metros
+    msp = doc.modelspace()
+    if terrain_z is not None:
+        for y in (0, 40):
+            msp.add_lwpolyline(
+                [(0, y), (40, y)],
+                dxfattribs={"layer": "CURVAS", "elevation": terrain_z + y / 10},
+            )
+    for x, z in zip((5, 20), building_z, strict=True):
+        msp.add_lwpolyline(
+            [(x, 5), (x + 5, 5), (x + 5, 10), (x, 10)],
+            close=True,
+            dxfattribs={"layer": "-EDIFICIOS", "elevation": z},
+        )
+        msp.add_text("4P", dxfattribs={"layer": "ROTULOS", "insert": (x + 2, 7)})
+    path = tmp_path / "bases.dxf"
+    doc.saveas(path)
+    read = read_dxf(path)
+    config = parse_config(yaml.safe_load(draft_config(read)))
+    rule = config.rule_for("-EDIFICIOS")
+    assert rule is not None
+    assert rule.height_from is HeightSource.TEXT
+    assert rule.base_from_terrain is (terrain_z is not None)
+    assert rule.base_from_elevation is (terrain_z is None)
+    geometry = build_scene(read, config).layers["-EDIFICIOS"]
+    assert len(geometry.objects) == 2
+    assert [obj.height for obj in geometry.objects] == [12.0, 12.0]
+    bases = sorted(float(obj.mesh.vertices[:, 2].min()) for obj in geometry.objects)
+    if terrain_z is None:
+        assert bases == sorted(building_z)
+    else:
+        assert bases == pytest.approx([terrain_z + 0.5] * 2)
+        assert geometry.stats.ground is not None
+        assert geometry.stats.ground.checked == 2
+        assert geometry.stats.ground.floating == 0
+        assert geometry.stats.ground.buried == 0
+
+
+def test_draft_keeps_elevation_as_height_when_no_other_source(tmp_path: Path) -> None:
+    import ezdxf
+
+    doc = ezdxf.new("R2018")
+    msp = doc.modelspace()
+    for y in (0, 40):
+        msp.add_lwpolyline([(0, y), (40, y)], dxfattribs={"layer": "CURVAS", "elevation": 10 + y})
+    msp.add_lwpolyline(
+        [(5, 5), (10, 5), (10, 10), (5, 10)],
+        close=True,
+        dxfattribs={"layer": "EDIFICIOS", "elevation": 35},
+    )
+    path = tmp_path / "coronacion.dxf"
+    doc.saveas(path)
+    config = parse_config(yaml.safe_load(draft_config(read_dxf(path))))
+    rule = config.rule_for("EDIFICIOS")
+    assert rule is not None
+    assert rule.height_from is HeightSource.ELEVATION
+    assert not rule.base_from_terrain
+    assert not rule.base_from_elevation

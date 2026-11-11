@@ -42,6 +42,14 @@ def concat(meshes: list[MeshData]) -> MeshData:
     return MeshData(vertices, faces.astype(np.int64))
 
 
+def box_corners(vertices: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Ocho esquinas de la caja: deben transformarse todas si hay rotación."""
+    lo, hi = vertices.min(axis=0), vertices.max(axis=0)
+    return np.array(
+        [[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+    )
+
+
 def triangle_areas(vertices: NDArray[np.float64], faces: NDArray[np.int64]) -> NDArray[np.float64]:
     a, b, c = (vertices[faces[:, i]] for i in range(3))
     u, v = b - a, c - a  # producto vectorial explícito: np.cross es lento en arrays pequeños

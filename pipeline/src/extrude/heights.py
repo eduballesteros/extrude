@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+import numpy as np
 import shapely
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
 
 from extrude.config import HeightSource, Kind, LayerRule, ValueMeaning
 from extrude.model import TextFeature
@@ -35,6 +36,7 @@ class HeightResult:
     height: float | None
     origin: HeightOrigin
     ambiguous: bool = False  # varios textos/atributos con valores distintos
+    nearby: bool = False  # de un texto fuera del contorno, a ≤ text_tolerance
 
 
 def parse_number(raw: str) -> float | None:
@@ -61,19 +63,83 @@ class TextIndex:
         self.points = [Point(*(t.position[:2] * scale)) for t in self.texts]
         self.tree = shapely.STRtree(self.points)
 
-    def inside(self, footprint: Footprint) -> list[tuple[TextFeature, float]]:
-        """Textos dentro de la huella, con su distancia al punto representativo."""
+    def inside(
+        self, footprint: Footprint, neighbors: Neighbors | None = None
+    ) -> list[tuple[TextFeature, float]]:
+        """Textos interiores o en fachada exterior; nunca patios ni medianeras ambiguas."""
         if not self.texts:
             return []
         anchor = footprint.polygon.representative_point()
-        hits = self.tree.query(footprint.polygon, predicate="contains")
-        found = [(self.texts[int(i)], anchor.distance(self.points[int(i)])) for i in hits]
+        polygon = footprint.polygon
+        hits = self.tree.query(polygon, predicate="covers")
+        found = []
+        for i in hits:
+            point = self.points[int(i)]
+            if not polygon.contains(point):
+                if not polygon.exterior.covers(point):
+                    continue  # borde de patio
+                if neighbors is not None and not neighbors.belongs_to(point, footprint):
+                    continue  # fachada compartida: no asignar a ninguno
+            found.append((self.texts[int(i)], anchor.distance(point)))
+        return sorted(found, key=lambda pair: pair[1])
+
+    def near(
+        self, footprint: Footprint, tolerance: float, neighbors: Neighbors | None = None
+    ) -> list[tuple[TextFeature, float]]:
+        """Rescate: textos fuera del contorno exterior a ≤ `tolerance` m, por distancia al borde.
+
+        Los puntos de inserción suelen quedar unos centímetros fuera de la fachada. Para no robar
+        el rótulo del edificio vecino (medianeras), con `neighbors` se descartan los textos que
+        caen dentro de otra huella o que están igual o más cerca de otra. Los de los patios no
+        cuentan: están dentro del contorno exterior.
+        """
+        if not self.texts or tolerance <= 0:
+            return []
+        hits = self.tree.query(footprint.polygon, predicate="dwithin", distance=tolerance)
+        outline = Polygon(footprint.polygon.exterior)
+        found = []
+        for i in hits:
+            point = self.points[int(i)]
+            if outline.covers(point):
+                continue  # dentro (ya buscado) o en un patio
+            if neighbors is not None and not neighbors.belongs_to(point, footprint):
+                continue
+            found.append((self.texts[int(i)], footprint.polygon.distance(point)))
         return sorted(found, key=lambda pair: pair[1])
 
 
-def resolve_height(footprint: Footprint, rule: LayerRule, texts: TextIndex) -> HeightResult:
+class Neighbors:
+    """Huellas de una capa, para asignar un texto exterior solo a la más cercana."""
+
+    TIE_M = 1e-6
+
+    def __init__(self, footprints: Sequence[Footprint]) -> None:
+        self.polygons = [f.polygon for f in footprints]
+        self.index = {id(p): i for i, p in enumerate(self.polygons)}
+        self.tree = shapely.STRtree(self.polygons)
+
+    def belongs_to(self, point: Point, footprint: Footprint) -> bool:
+        own = self.index.get(id(footprint.polygon))
+        if own is None:
+            return True
+        mine = self.polygons[own].distance(point)
+        close = [
+            int(i)
+            for i in self.tree.query(point, predicate="dwithin", distance=mine + self.TIE_M)
+            if int(i) != own
+        ]
+        if not close:
+            return True
+        distances = np.array([self.polygons[i].distance(point) for i in close])
+        # dentro de otra huella (distancia 0), empate o vecino más cerca: no es de esta
+        return not bool((distances <= mine + self.TIE_M).any())
+
+
+def resolve_height(
+    footprint: Footprint, rule: LayerRule, texts: TextIndex, neighbors: Neighbors | None = None
+) -> HeightResult:
     if rule.height_from is not None:
-        found = _from_source(footprint, rule, texts)
+        found = _from_source(footprint, rule, texts, neighbors)
         if found is not None:
             return found
     if rule.floors is not None:
@@ -87,13 +153,16 @@ def resolve_height(footprint: Footprint, rule: LayerRule, texts: TextIndex) -> H
     return HeightResult(None, HeightOrigin.MISSING)
 
 
-def _from_source(footprint: Footprint, rule: LayerRule, texts: TextIndex) -> HeightResult | None:
+def _from_source(
+    footprint: Footprint, rule: LayerRule, texts: TextIndex, neighbors: Neighbors | None
+) -> HeightResult | None:
     match rule.height_from:
         case HeightSource.ATTRIBUTE:
-            values = _attribute_values(footprint, rule, texts)
-            return _pick(values, rule, HeightOrigin.ATTRIBUTE)
+            values, nearby = _attribute_values(footprint, rule, texts, neighbors)
+            return _pick(values, rule, HeightOrigin.ATTRIBUTE, nearby)
         case HeightSource.TEXT:
-            return _pick(_text_values(footprint, rule, texts), rule, HeightOrigin.TEXT)
+            values, nearby = _text_values(footprint, rule, texts, neighbors)
+            return _pick(values, rule, HeightOrigin.TEXT, nearby)
         case HeightSource.BLOCK:
             values = [
                 v
@@ -108,32 +177,69 @@ def _from_source(footprint: Footprint, rule: LayerRule, texts: TextIndex) -> Hei
             return None
 
 
-def _attribute_values(footprint: Footprint, rule: LayerRule, texts: TextIndex) -> list[float]:
+Found = tuple[list[float], bool]  # valores (el más cercano primero) y si son de rescate
+Hits = list[tuple[TextFeature, float]]
+
+
+def _inside_then_near(
+    footprint: Footprint,
+    rule: LayerRule,
+    texts: TextIndex,
+    neighbors: Neighbors | None,
+    values_of: Callable[[Hits], list[float]],
+) -> Found:
+    """Valores de los textos dentro de la huella; si no hay ninguno válido, los de justo fuera
+    (a ≤ text_tolerance), ordenados por distancia al borde."""
+    values = values_of(texts.inside(footprint, neighbors))
+    if values:
+        return values, False
+    values = values_of(texts.near(footprint, rule.text_tolerance, neighbors))
+    return values, bool(values)
+
+
+def _attribute_values(
+    footprint: Footprint, rule: LayerRule, texts: TextIndex, neighbors: Neighbors | None
+) -> Found:
     tag = (rule.attribute or "").upper()
     own = [v for s in footprint.sources for t, v in s.attributes if t.upper() == tag]
-    if not own:  # bloque-etiqueta colocado dentro del polígono
-        own = [t.text for t, _ in texts.inside(footprint) if (t.tag or "").upper() == tag]
-    return [n for n in (parse_number(v) for v in own) if n is not None]
+    if own:
+        return [n for n in (parse_number(v) for v in own) if n is not None], False
+
+    def tagged(hits: Hits) -> list[float]:
+        raw = [t.text for t, _ in hits if (t.tag or "").upper() == tag]
+        return [n for n in (parse_number(v) for v in raw) if n is not None]
+
+    # bloque-etiqueta colocado dentro del polígono (o justo fuera)
+    return _inside_then_near(footprint, rule, texts, neighbors, tagged)
 
 
-def _text_values(footprint: Footprint, rule: LayerRule, texts: TextIndex) -> list[float]:
+def _text_values(
+    footprint: Footprint, rule: LayerRule, texts: TextIndex, neighbors: Neighbors | None
+) -> Found:
     pattern = re.compile(rule.text_regex)
-    values = []
-    for text, _ in texts.inside(footprint):
-        if not rule.text_layer_matches(text.layer):
-            continue
-        match = pattern.search(text.text)
-        number = parse_number(match.group(1)) if match else None
-        if number is not None:
-            values.append(number)
-    return values
+
+    def matching(hits: Hits) -> list[float]:
+        values = []
+        for text, _ in hits:
+            if not rule.text_layer_matches(text.layer):
+                continue
+            match = pattern.search(text.text)
+            number = parse_number(match.group(1)) if match else None
+            if number is not None:
+                values.append(number)
+        return values
+
+    return _inside_then_near(footprint, rule, texts, neighbors, matching)
 
 
-def _pick(values: list[float], rule: LayerRule, origin: HeightOrigin) -> HeightResult | None:
+def _pick(
+    values: list[float], rule: LayerRule, origin: HeightOrigin, nearby: bool = False
+) -> HeightResult | None:
     if not values:
         return None
-    value = values[0]  # el más cercano al centro de la huella
+    value = values[0]  # el más cercano al centro (o al borde, si es un texto de fuera)
     ambiguous = len(set(values)) > 1
     if rule.value_means is ValueMeaning.METERS:
-        return HeightResult(value, origin, ambiguous)
-    return HeightResult((value + rule.floor_offset) * rule.floor_height, origin, ambiguous)
+        return HeightResult(value, origin, ambiguous, nearby)
+    height = (value + rule.floor_offset) * rule.floor_height
+    return HeightResult(height, origin, ambiguous, nearby)

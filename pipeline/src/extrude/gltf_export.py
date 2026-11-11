@@ -23,7 +23,7 @@ from numpy.typing import NDArray
 from extrude import __version__
 from extrude.build import LineObject, SceneObject
 from extrude.config import Kind, LayerRule, Material
-from extrude.extrusion import MeshData
+from extrude.extrusion import MeshData, box_corners
 from extrude.instancing import InstanceGroup, Matrix, decompose_trs, transform
 
 AXIS_TRANSFORM_DOC = "(x, y, z)_dwg -> (x, z, -y)_gltf"
@@ -47,6 +47,8 @@ class ExportLayer:
     groups: list[InstanceGroup] = field(default_factory=list)
     lines: list[LineObject] = field(default_factory=list)
     source_entities: dict[str, int] = field(default_factory=dict)
+    # {"checked", "floating", "buried"} frente al terreno (build.GroundCheck); None sin terreno
+    ground_check: dict[str, int] | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -58,6 +60,9 @@ class SceneInfo:
     origin: tuple[float, float, float]  # metros, ejes DWG
     source_units: str
     crs: str | None = None
+    # Centro de la escena en WGS84 (grados), si el CRS se puede reproyectar: sitúa el sol
+    center_lat: float | None = None
+    center_lon: float | None = None
 
 
 @dataclass(frozen=True)
@@ -236,6 +241,8 @@ def build_glb(layers: Sequence[ExportLayer], info: SceneInfo) -> tuple[bytes, Gl
             "visible": layer.rule.visible,
             "source_entities": layer.source_entities,
         }
+        if layer.ground_check is not None:
+            extras["ground_check"] = layer.ground_check
         triangles = 0
         if layer.objects:
             prim, tri, b = _merged_primitive(builder, layer.objects, info.origin, material)
@@ -276,6 +283,8 @@ def build_glb(layers: Sequence[ExportLayer], info: SceneInfo) -> tuple[bytes, Gl
         "units": "m",
         "source_units": info.source_units,
         "crs": info.crs,
+        "center_lat": info.center_lat,
+        "center_lon": info.center_lon,
         "axis_transform": AXIS_TRANSFORM_DOC,
         "bbox": bbox,
     }
@@ -365,7 +374,7 @@ def _instanced_node(
     to_gltf = DWG_TO_GLTF @ recenter
     back = np.linalg.inv(DWG_TO_GLTF)
     translations, rotations, scales = [], [], []
-    corners = _box_corners(proto.vertices)
+    corners = box_corners(proto.vertices)
     lo = np.full(3, np.inf)
     hi = np.full(3, -np.inf)
     for matrix in group.matrices:
@@ -403,13 +412,6 @@ def _instanced_node(
     return node, triangles, (lo.astype(np.float32), hi.astype(np.float32))
 
 
-def _box_corners(vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-    lo, hi = vertices.min(axis=0), vertices.max(axis=0)
-    return np.array(
-        [[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
-    )
-
-
 def _object_table(objects: Sequence[SceneObject], rule: LayerRule) -> dict[str, list[Any]]:
     """Metadatos por objeto (arrays paralelos). loors = altura / altura de planta (edificios);
     ase = cota de la base en metros (ejes DWG, sin recentrar en Z)."""
@@ -421,10 +423,22 @@ def _object_table(objects: Sequence[SceneObject], rule: LayerRule) -> dict[str, 
             for o in objects
         ],
         "base": [
-            round(float(o.mesh.vertices[:, 2].min()), 3) if len(o.mesh.vertices) else None
+            round(o.floor_elevation, 3)
+            if o.floor_elevation is not None
+            else round(float(o.mesh.vertices[:, 2].min()), 3)
+            if len(o.mesh.vertices)
+            else None
             for o in objects
         ],
+        "foundation_height": [round(o.foundation_height, 3) for o in objects],
         "height_origin": [o.height_origin.value if o.height_origin else None for o in objects],
         "source_type": [o.source_type for o in objects],
-        "handle": [o.handles[0] if o.handles else None for o in objects],
+        "handle": [
+            o.handles[0]
+            if o.handles
+            else o.source_insert.handle.partition("#")[0]
+            if o.source_insert
+            else None
+            for o in objects
+        ],
     }

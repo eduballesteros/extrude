@@ -1,6 +1,8 @@
 """Herramientas Node opcionales (carpeta `tools/` del repo): validación y compresión glTF.
 
-Se ejecuta `node` directamente (sin shell ni `npx.cmd`) y con rutas generadas por Extrude.
+Se ejecuta `node` directamente (sin shell ni `npx.cmd`) y con rutas generadas por Extrude. Node
+se lanza con cwd = tools/ (para resolver sus node_modules), así que toda ruta que reciba se pasa
+antes a absoluta respecto al directorio actual: `-o out` es relativo a donde se ejecuta extrude.
 """
 
 from __future__ import annotations
@@ -38,7 +40,12 @@ class NodeToolError(ExtrudeError):
 
 def tools_dir() -> Path:
     override = os.environ.get(TOOLS_DIR_ENV)
-    return Path(override) if override else Path(__file__).resolve().parents[3] / "tools"
+    return Path(override).resolve() if override else Path(__file__).resolve().parents[3] / "tools"
+
+
+def _arg(path: Path) -> str:
+    """Ruta absoluta respecto al directorio actual (no al cwd=tools/ con que corre Node)."""
+    return str(Path(path).resolve())
 
 
 def _node() -> str:
@@ -75,7 +82,7 @@ def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
 def compress(source: Path, target: Path, method: Compression) -> None:
     cli = _script("node_modules/@gltf-transform/cli/bin/cli.js")
     # 16 bits: máximo admitido; los _OBJECT_ID enteros ≤ 65535 se recuperan exactos al redondear.
-    result = _run([str(cli), method.value, str(source), str(target), *QUANTIZE_ARGS])
+    result = _run([str(cli), method.value, _arg(source), _arg(target), *QUANTIZE_ARGS])
     if result.returncode != 0 or not target.is_file():
         raise NodeToolError(
             f"gltf-transform {method.value} falló: {(result.stderr or result.stdout)[-800:]}",
@@ -85,7 +92,7 @@ def compress(source: Path, target: Path, method: Compression) -> None:
 
 def attributes(path: Path) -> list[dict[str, Any]]:
     """Resumen decodificado (también Draco/Meshopt) de _OBJECT_ID y POSITION por primitiva."""
-    result = _run([str(_script("attributes.mjs")), str(path)])
+    result = _run([str(_script("attributes.mjs")), _arg(path)])
     if result.returncode != 0:
         raise NodeToolError(
             f"No se pudo decodificar {path.name}: {result.stderr[-800:]}", INSTALL_HINT
@@ -96,7 +103,7 @@ def attributes(path: Path) -> list[dict[str, Any]]:
 
 def validate(paths: list[Path]) -> list[dict[str, Any]]:
     """Informe de gltf-validator por archivo (errors, warnings, messages)."""
-    result = _run([str(_script("validate.mjs")), *(str(p) for p in paths)])
+    result = _run([str(_script("validate.mjs")), *(_arg(p) for p in paths)])
     try:
         parsed: list[dict[str, Any]] = json.loads(result.stdout)
     except json.JSONDecodeError as exc:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -97,3 +98,82 @@ def test_dirty_fixture_repairs_are_counted(samples_dir: Path) -> None:
     assert all(f.polygon.is_valid for f in footprints)
     rounded = next(f for f in footprints if f.polygon.bounds[0] == pytest.approx(40))
     assert rounded.polygon.area == pytest.approx(10 * 5 + np.pi * 25 / 2, rel=1e-3)
+
+
+def _segments_at(square: list[tuple[float, float]], z: float) -> list[PolylineFeature]:
+    """Cuadrado dibujado como cuatro segmentos abiertos a cota z."""
+    corners = [*square, square[0]]
+    return [
+        PolylineFeature("L", np.array([(*a, z), (*b, z)], dtype=np.float64), False, SRC)
+        for a, b in pairwise(corners)
+    ]
+
+
+def test_segment_rings_keep_their_own_elevation() -> None:
+    low = _segments_at([(0, 0), (10, 0), (10, 10), (0, 10)], 10.0)
+    high = _segments_at([(50, 0), (60, 0), (60, 10), (50, 10)], 50.0)
+    degenerate = PolylineFeature("L", np.array([(30, 30, 99.0)]), False, SRC)  # 1 punto
+    footprints, stats = build_footprints([degenerate, *low, *high], [], scale=1, tolerance=0.01)
+    assert stats.loops_from_segments == 2
+    by_x = sorted(footprints, key=lambda f: f.polygon.bounds[0])
+    assert [f.elevation for f in by_x] == [10.0, 50.0]
+    assert all(len(f.sources) == 4 for f in by_x)
+
+
+@pytest.mark.parametrize("scale", [1, 0.001])
+def test_level_topology_keeps_same_level_duplicates_and_patios(scale: float) -> None:
+    lines = []
+    for z in (0, 20):
+        for shape in (SQUARE_10, list(reversed(SQUARE_10)), SQUARE_IN):
+            lines.append(
+                PolylineFeature("L", np.array([(*p, z) for p in shape]) / scale, True, SRC)
+            )
+    footprints, stats = build_footprints(
+        lines,
+        [],
+        scale=scale,
+        tolerance=0.01,
+        separate_elevations=True,
+    )
+    assert sorted(f.elevation for f in footprints) == [0, 20]
+    assert [f.polygon.area for f in footprints] == [91, 91]
+    assert stats.duplicates_removed == 2
+    assert stats.holes == 2
+
+
+def test_contained_outline_at_another_level_is_not_a_patio() -> None:
+    outer = poly(SQUARE_10)
+    upper = PolylineFeature("L", np.array([(*p, 20.0) for p in SQUARE_IN]), True, SRC)
+    footprints, stats = build_footprints(
+        [outer, upper],
+        [],
+        scale=1,
+        tolerance=0.01,
+        separate_elevations=True,
+    )
+    assert len(footprints) == 2
+    assert sorted(f.polygon.area for f in footprints) == [9, 100]
+    assert stats.holes == 0
+
+
+def test_two_dimensional_rules_keep_xy_deduplication() -> None:
+    lower = poly(SQUARE_10)
+    upper = PolylineFeature("L", lower.points + np.array([0, 0, 20]), True, SRC)
+    footprints, stats = build_footprints([lower, upper], [], scale=1, tolerance=0.01)
+    assert len(footprints) == 1
+    assert stats.duplicates_removed == 1
+
+
+def test_level_deduplication_uses_metric_tolerance() -> None:
+    lower = poly(SQUARE_10)
+    near = PolylineFeature("L", lower.points + np.array([0, 0, 0.001]), True, SRC)
+    upper = PolylineFeature("L", lower.points + np.array([0, 0, 0.02]), True, SRC)
+    footprints, stats = build_footprints(
+        [lower, near, upper],
+        [],
+        scale=1,
+        tolerance=0.01,
+        separate_elevations=True,
+    )
+    assert len(footprints) == 2
+    assert stats.duplicates_removed == 1

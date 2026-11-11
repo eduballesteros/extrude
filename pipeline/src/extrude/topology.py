@@ -12,6 +12,7 @@ Todo lo reparado o descartado se cuenta en `TopologyStats`.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, fields
 
@@ -65,8 +66,34 @@ def build_footprints(
     scale: float,
     tolerance: float,
     detect_holes: bool = True,
+    separate_elevations: bool = False,
 ) -> tuple[list[Footprint], TopologyStats]:
     stats = TopologyStats()
+    if separate_elevations:
+        # La topología XY solo es comparable dentro de una misma cota cuando Z determina
+        # la base o altura del volumen. Separar ANTES de poligonizar también evita fusionar
+        # segmentos superpuestos y promediar sus Z; los patios tampoco cruzan niveles.
+        levels: dict[int, tuple[list[PolylineFeature], list[HatchFeature]]] = defaultdict(
+            lambda: ([], [])
+        )
+        for line in polylines:
+            level = round(_mean_elevation([line.points]) * scale / tolerance)
+            levels[level][0].append(line)
+        for hatch in hatches:
+            level = round(_mean_elevation(hatch.loops) * scale / tolerance)
+            levels[level][1].append(hatch)
+        all_footprints = []
+        for level_lines, level_hatches in levels.values():
+            footprints, level_stats = build_footprints(
+                level_lines,
+                level_hatches,
+                scale=scale,
+                tolerance=tolerance,
+                detect_holes=detect_holes,
+            )
+            all_footprints.extend(footprints)
+            stats.add(level_stats)
+        return all_footprints, stats
     min_area = tolerance * tolerance
     rings: list[_Ring] = []
     segments: list[PolylineFeature] = []
@@ -149,10 +176,12 @@ def _rings_from_segments(
 ) -> list[_Ring]:
     if not segments:
         return []
-    coords = [f.points * scale for f in segments if len(f.points) >= 2]
+    kept = [f for f in segments if len(f.points) >= 2]  # índices de `lines` = índices de `kept`
+    if not kept:
+        return []
+    coords = [f.points * scale for f in kept]
     _snap_endpoints(coords, tolerance)
     lines = [LineString(c[:, :2]) for c in coords]
-    elevation = float(np.mean([c[:, 2].mean() for c in coords]))
     polygons, _cuts, dangles, _invalid = polygonize_full(unary_union(lines))
     stats.dangling_segments += len(getattr(dangles, "geoms", []))
     tree = shapely.STRtree(lines)
@@ -163,9 +192,16 @@ def _rings_from_segments(
             continue
         stats.loops_from_segments += 1
         near = tree.query(polygon.exterior, predicate="dwithin", distance=tolerance)
-        sources = tuple(segments[int(i)].source for i in near)
+        sources = tuple(kept[int(i)].source for i in near)
+        elevation = _mean_elevation([coords[int(i)] for i in near])
         rings.append(_Ring(Polygon(polygon.exterior), elevation, sources))
     return rings
+
+
+def _mean_elevation(coords: Sequence[NDArray[np.float64]]) -> float:
+    """Z media de los segmentos que forman un anillo; 0.0 si no hay datos 3D."""
+    z = [c[:, 2] for c in coords if c.ndim == 2 and c.shape[1] >= 3 and len(c)]
+    return float(np.concatenate(z).mean()) if z else 0.0
 
 
 def _snap_endpoints(coords: list[NDArray[np.float64]], tolerance: float) -> None:

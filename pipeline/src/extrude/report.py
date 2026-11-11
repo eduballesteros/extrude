@@ -59,8 +59,16 @@ def build_report(result: ConvertResult, source: Path, options: ConvertOptions) -
             "topology": vars(stats.topology).copy(),
             "heights": {str(k): v for k, v in stats.heights.items()},
             "ambiguous_heights": stats.ambiguous_heights,
+            "nearby_text_heights": stats.nearby_text_heights,
             "dropped_without_height": stats.dropped_without_height,
             "degenerate_triangles": stats.degenerate_triangles,
+            "ground_check": stats.ground.as_dict() if stats.ground else None,
+            "ground_details": stats.ground_details,
+            "terrain_coverage": stats.terrain_coverage,
+            "terrain_foundations": sum(o.foundation_height > 0 for o in geometry.objects),
+            "max_foundation_height_m": max(
+                (o.foundation_height for o in geometry.objects), default=0.0
+            ),
         }
     for status, group in (
         ("ignored", build.ignored),
@@ -143,7 +151,27 @@ def _warnings(result: ConvertResult, layers: dict[str, dict[str, Any]]) -> list[
                 f"Capa {name}: {info['ambiguous_heights']} polígonos con varios valores de "
                 "altura dentro; se usó el más cercano al centro. Acota text_layers."
             )
+        if info.get("nearby_text_heights"):
+            warnings.append(
+                f"Capa {name}: {info['nearby_text_heights']} alturas leídas de textos justo "
+                "fuera del contorno (text_tolerance). Revísalas o pon text_tolerance: 0."
+            )
         defaulted = info.get("heights", {}).get(HeightOrigin.DEFAULT.value, 0)
+        partially_buried = (info.get("ground_check") or {}).get("partially_buried", 0)
+        foundations = info.get("terrain_foundations", 0)
+        if foundations and info.get("max_foundation_height_m", 0) > 1:
+            warnings.append(
+                f"Capa {name}: {foundations} edificios con zócalo automático adaptado al terreno "
+                f"(máximo {info['max_foundation_height_m']:.2f} m). "
+                "Es una aproximación geométrica: revisa las cotas de proyecto y las alturas "
+                "asignadas, especialmente en laderas fuertes."
+            )
+        if partially_buried:
+            warnings.append(
+                f"Capa {name}: {partially_buried} sólidos parcialmente enterrados; el terreno "
+                "supera la cubierta en parte de la huella. Revisa la altura asignada, la base "
+                "y las curvas originales (ver detalle de apoyo). No se reasientan automáticamente."
+            )
         if info.get("kind") == "building" and defaulted:
             warnings.append(
                 f"Capa {name}: {defaulted} edificios usan default_height (no se encontró "
@@ -213,6 +241,87 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{t['degenerate_dropped']} | {t['holes']} | {_fmt_counts(info['heights'])} | "
             f"{info['dropped_without_height']} | {info['ambiguous_heights']} |"
         )
+
+    ground_layers = {n: i for n, i in converted.items() if i.get("ground_check")}
+    if ground_layers:
+        lines += [
+            "",
+            "## Apoyo sobre el terreno",
+            "",
+            "Tolerancia: 1 m. Cotas y coordenadas en metros, en los ejes originales del dibujo.",
+            "Una intersección con ladera no demuestra un error del archivo. "
+            "Con base_mode=terrain_min, "
+            "el programa coloca una base horizontal en la cota mínima bajo la huella; "
+            "la ladera puede superar la base e incluso la cubierta. Las alturas de origen "
+            "default_height o block son valores de configuración, "
+            "no alturas 3D verificadas del plano.",
+            "Si la huella no está cubierta por el TIN, parte del apoyo se estima con el punto "
+            "de terreno más cercano. Contrasta las cotas con las curvas originales "
+            "antes de corregir.",
+            "Con terrain_support=foundation, la planta horizontal se coloca en la cota máxima "
+            "más el desplazamiento configurado; la altura asignada se mide desde esa planta. "
+            "El zócalo baja hasta el terreno y la cubierta permanece horizontal. "
+            "El zócalo es una aproximación automática, no una cimentación estructural calculada. "
+            "Los casos foundation indican adaptaciones realizadas, no enterramientos pendientes.",
+            "",
+            "| Capa | Comprobados | Flotan | Enterrados | "
+            "Intersecan ladera | Parcialmente enterrados |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+        for name, info in ground_layers.items():
+            c = info["ground_check"]
+            lines.append(
+                f"| {name} | {c['checked']} | {c['floating']} | {c['buried']} | "
+                f"{c.get('intersecting', 0)} | {c.get('partially_buried', 0)} |"
+            )
+        lines += [
+            "",
+            "### Objetos que revisar",
+            "",
+            "Los handles identifican entidades del DXF leído. En un DWG convertido, "
+            "verifica su correspondencia en el DXF intermedio. "
+            "El detalle completo está en report.json.",
+            "",
+            "| Capa | Caso | Handles | XY (m) | Z original | Base / cubierta | "
+            "Terreno mín. / máx. | Altura / origen | Base aplicada | Dentro del TIN | "
+            "Planta / zócalo |",
+            "|---|---|---|---|---:|---|---|---|---|---|---|",
+        ]
+
+        def cell(value: object) -> str:
+            return str(value).replace("|", "\\|").replace("\n", " ")
+
+        def meters(value: float | None) -> str:
+            return "—" if value is None else f"{value:.2f}"
+
+        categories = {
+            "floating": "Flota completamente",
+            "buried": "Enterrado completamente",
+            "intersecting": "Interseca la ladera",
+            "partially_buried": "Enterrado parcialmente",
+            "foundation": "Zócalo adaptado",
+            "supported": "Apoyo sin incidencia de cota",
+            "unverified_contact": "Contacto sin verificar",
+        }
+        for name, info in ground_layers.items():
+            for d in info.get("ground_details", []):
+                if d["category"] == "supported" and d["terrain_covered"] is True:
+                    continue  # el JSON conserva la cobertura de todos los objetos comprobados
+                xy = d["xy_m"]
+                position = ", ".join(meters(v) for v in xy) if xy is not None else "—"
+                identifiers = list(d["handles"])
+                if d.get("insert_handle"):
+                    identifiers.append(f"INSERT {d['insert_handle']} ({d.get('block', '')})")
+                lines.append(
+                    f"| {cell(name)} | {categories[d['category']]} | "
+                    f"{cell(', '.join(identifiers))} | "
+                    f"{position} | {meters(d['source_elevation_m'])} | "
+                    f"{meters(d['base_m'])} / {meters(d['top_m'])} | "
+                    f"{meters(d['terrain_min_m'])} / {meters(d['terrain_max_m'])} | "
+                    f"{meters(d['height_m'])} / {d['height_origin']} | {d['base_mode']} | "
+                    f"{ {True: 'sí', False: 'no', None: '—'}[d['terrain_covered']] } | "
+                    f"{meters(d.get('floor_m'))} / {meters(d.get('foundation_height_m'))} |"
+                )
 
     for title, key in (
         ("No soportadas", "unsupported"),
