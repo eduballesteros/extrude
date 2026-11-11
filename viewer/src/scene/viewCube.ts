@@ -14,11 +14,11 @@ export interface CubeFaceDef {
 
 /** Caras del cubo en coordenadas de la escena (Y arriba; norte del dibujo = −Z). */
 export const CUBE_FACES: CubeFaceDef[] = [
-  { id: 'top', label: 'PLANTA', normal: [0, 1, 0] },
-  { id: 'north', label: 'N', normal: [0, 0, -1] },
-  { id: 'south', label: 'S', normal: [0, 0, 1] },
-  { id: 'east', label: 'E', normal: [1, 0, 0] },
-  { id: 'west', label: 'O', normal: [-1, 0, 0] },
+  { id: 'top', label: 'TOP', normal: [0, 1, 0] },
+  { id: 'north', label: 'BACK', normal: [0, 0, -1] },
+  { id: 'south', label: 'FRONT', normal: [0, 0, 1] },
+  { id: 'east', label: 'RIGHT', normal: [1, 0, 0] },
+  { id: 'west', label: 'LEFT', normal: [-1, 0, 0] },
 ];
 
 export interface ProjectedFace {

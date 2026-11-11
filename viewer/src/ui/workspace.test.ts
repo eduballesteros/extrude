@@ -4,7 +4,11 @@ import { PRESET_DIRECTIONS, type ViewPreset } from '../scene/navigation';
 import { download } from '../scene/loader';
 import { sunTimes } from '../scene/sun';
 import { northScreenAngle, projectCube } from '../scene/viewCube';
-import { formatHour, shadowQuality } from './inspector';
+import { compactNumber, parseNumeric } from './dom';
+import { primaryRows } from './info';
+import { dialPoint, dialToSun, formatHour, fromEv, shadowMode, toEv } from './inspector';
+import { originBadge } from './topbar';
+import { formatOf } from './viewsPanel';
 
 function cameraFrom(preset: ViewPreset): PerspectiveCamera {
   const camera = new PerspectiveCamera();
@@ -70,12 +74,86 @@ describe('línea de tiempo solar', () => {
   });
 });
 
-describe('calidad de sombras', () => {
-  it('se deduce de activado + resolución', () => {
-    expect(shadowQuality(false, 4096)).toBe('off');
-    expect(shadowQuality(true, 2048)).toBe('medium');
-    expect(shadowQuality(true, 4096)).toBe('high');
-    expect(shadowQuality(true, 8192)).toBe('high');
+describe('controles del inspector', () => {
+  it('modo de sombras: apagadas / PCF / VSM', () => {
+    expect(shadowMode(false, 'vsm')).toBe('off');
+    expect(shadowMode(true, 'pcf')).toBe('pcf');
+    expect(shadowMode(true, 'vsm')).toBe('vsm');
+  });
+
+  it('exposición en EV ida y vuelta', () => {
+    expect(toEv(1)).toBe(0);
+    expect(toEv(2)).toBeCloseTo(1);
+    expect(fromEv(-1)).toBe(0.5);
+    expect(fromEv(toEv(1.7))).toBeCloseTo(1.7);
+  });
+
+  it('dial solar: norte arriba, cénit en el centro, inversa coherente', () => {
+    const [x0, y0] = dialPoint(0, 0, 40);
+    expect(x0).toBeCloseTo(0);
+    expect(y0).toBeCloseTo(-40);
+    const [x1, y1] = dialPoint(90, 90, 40);
+    expect(Math.hypot(x1, y1)).toBeCloseTo(0);
+    const [x2, y2] = dialPoint(214.3, 41.2, 40);
+    const back = dialToSun(x2, y2, 40);
+    expect(back.azimuthDeg).toBeCloseTo(214.3, 3);
+    expect(back.elevationDeg).toBeCloseTo(41.2, 3);
+  });
+
+  it('campo numérico: coma decimal, límites, paso y rechazo de basura', () => {
+    expect(parseNumeric('1,5', 0, 10, 0.1)).toBe(1.5);
+    expect(parseNumeric(' 42 ', 0, 10, 1)).toBe(10);
+    expect(parseNumeric('-3', 0, 10, 1)).toBe(0);
+    expect(parseNumeric('0.123', 0, 1, 0.05)).toBe(0.1);
+    expect(parseNumeric('abc', 0, 10, 1)).toBeNull();
+    expect(parseNumeric('', 0, 10, 1)).toBeNull();
+    expect(parseNumeric('1e400', 0, 10, 1)).toBeNull();
+  });
+
+  it('números compactos para la barra de estado', () => {
+    expect(compactNumber(1_400_000)).toBe('1.4M');
+    expect(compactNumber(12_300)).toBe('12.3K');
+    expect(compactNumber(950)).toBe('950');
+  });
+});
+
+describe('barra superior, vistas e inspección', () => {
+  it('distintivo de origen: CRS o recentrado con X, Y', () => {
+    expect(originBadge(null)).toBeNull();
+    expect(originBadge({ origin_offset: [0, 0, 0], crs: null } as never)).toBeNull();
+    expect(
+      originBadge({ origin_offset: [440123.4, 4474567.8, 0], crs: 'EPSG:25830' } as never),
+    ).toBe('EPSG:25830: 440123, 4474568');
+    expect(originBadge({ origin_offset: [10, 20, 0], crs: null } as never)).toBe(
+      'Recentrado: 10, 20',
+    );
+  });
+
+  it('formato de render rápido o personalizado', () => {
+    expect(formatOf(3840, 2160)).toBe('16:9');
+    expect(formatOf(4961, 3508)).toBe('A3');
+    expect(formatOf(1000, 700)).toBe('');
+  });
+
+  it('tarjeta de inspección: capa, altura, plantas y handle formateados', () => {
+    const rows = primaryRows({
+      point: new Vector3(),
+      layer: 'EDIFICIOS',
+      kind: 'building',
+      fields: [
+        ['Objeto', '3'],
+        ['Altura (m)', '18'],
+        ['Plantas', '6'],
+        ['Cota base (m)', '—'],
+        ['Handle', '3fa1'],
+      ],
+    });
+    expect(rows).toEqual([
+      ['Capa', 'EDIFICIOS'],
+      ['Altura', '18.0 m'],
+      ['Plantas', '6'],
+      ['Handle', '#3FA1'],
+    ]);
   });
 });
 

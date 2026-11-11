@@ -1,5 +1,5 @@
 import type { App } from '../app';
-import type { LoadedModel } from '../scene/loader';
+import type { LoadedModel, SceneExtras } from '../scene/loader';
 import type { CameraType } from '../state';
 import type { ViewManager } from '../views/viewManager';
 import { button, h, icon, pickFile, segmented } from './dom';
@@ -19,15 +19,28 @@ interface MenuItem {
 }
 
 export interface TopBarHandlers {
-  onOpen: () => void;
+  onClose: () => void;
   onToggleZen: () => void;
 }
 
-/** Barra superior del espacio de trabajo. */
+/**
+ * Texto del distintivo de georreferencia: CRS (o "Recentrado") y el desplazamiento X, Y en
+ * metros (ejes del DWG). null si el modelo no está desplazado ni tiene CRS.
+ */
+export function originBadge(extras: SceneExtras | null | undefined): string | null {
+  if (!extras) return null;
+  const [x, y] = extras.origin_offset;
+  const moved = Math.abs(x) > 0.001 || Math.abs(y) > 0.001;
+  if (!extras.crs && !moved) return null;
+  const label = extras.crs ?? 'Recentrado';
+  return moved ? `${label}: ${x.toFixed(0)}, ${y.toFixed(0)}` : label;
+}
+
+/** Barra superior del espacio de trabajo (36 px). */
 export class TopBar {
   readonly element: HTMLElement;
   private readonly modelName = h('span', { class: 'model-name' });
-  private readonly badge = h('span', { class: 'badge', hidden: true });
+  private readonly badge = h('span', { class: 'badge mono', hidden: true });
   private readonly projection: ReturnType<typeof segmented<CameraType>>;
   private readonly menu = h('div', { class: 'menu', hidden: true, attrs: { role: 'menu' } });
   private downloads: DownloadLink[] = [];
@@ -49,8 +62,8 @@ export class TopBar {
       },
     );
 
-    const exportButton = button({ label: 'Exportar', icon: 'download', variant: 'primary' });
-    exportButton.append(icon('chevron-down', 14));
+    const exportButton = button({ label: 'Exportar', variant: 'primary', size: 'sm' });
+    exportButton.append(icon('chevron-down', 12));
     exportButton.setAttribute('aria-haspopup', 'menu');
     exportButton.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -67,42 +80,43 @@ export class TopBar {
       h(
         'div',
         { class: 'topbar-left' },
-        h(
-          'div',
-          { class: 'brand' },
-          h('span', { class: 'brand-mark' }, icon('logo', 18)),
-          h('span', { textContent: 'Extrude' }),
-        ),
+        h('span', { class: 'brand-mark', title: 'Extrude' }, icon('logo', 14)),
         h('span', { class: 'divider' }),
-        h('div', { class: 'model-info' }, icon('cube', 15), this.modelName, this.badge),
-        button({
-          label: 'Abrir',
-          icon: 'open',
-          variant: 'ghost',
-          title: 'Abrir o cambiar de modelo',
-          onClick: handlers.onOpen,
-        }),
+        this.modelName,
+        this.badge,
       ),
       h(
         'div',
         { class: 'topbar-center' },
         this.projection.element,
         button({
+          label: 'Ajustar',
           icon: 'frame',
           title: 'Encuadrar todo (F)',
           variant: 'ghost',
+          size: 'sm',
           onClick: () => app.nav.frame(),
         }),
       ),
       h(
         'div',
         { class: 'topbar-right' },
-        h('div', { class: 'menu-anchor' }, exportButton, this.menu),
         button({
           icon: 'zen',
           title: 'Ocultar/mostrar paneles (Tab)',
           variant: 'ghost',
+          size: 'sm',
           onClick: handlers.onToggleZen,
+        }),
+        h('div', { class: 'menu-anchor' }, exportButton, this.menu),
+        h('span', { class: 'divider' }),
+        button({
+          label: 'Cerrar modelo',
+          icon: 'close',
+          title: 'Cerrar y volver al inicio',
+          variant: 'ghost',
+          size: 'sm',
+          onClick: handlers.onClose,
         }),
       ),
     );
@@ -113,13 +127,12 @@ export class TopBar {
   setModel(model: LoadedModel): void {
     this.modelName.textContent = model.name;
     this.modelName.title = model.name;
-    const extras = model.extras;
-    const offset = extras?.origin_offset;
-    const hasOffset = offset && offset.some((v) => Math.abs(v) > 0.001);
-    this.badge.hidden = !(extras?.crs || hasOffset);
-    this.badge.textContent = extras?.crs ?? (hasOffset ? 'Origen recentrado' : '');
+    const text = originBadge(model.extras);
+    this.badge.hidden = text === null;
+    this.badge.textContent = text ?? '';
+    const offset = model.extras?.origin_offset;
     this.badge.title = offset
-      ? `origin_offset: ${offset.map((v) => v.toFixed(2)).join(', ')} m (coordenadas reales = escena + offset)`
+      ? `origin_offset (m, ejes DWG): ${offset.map((v) => v.toFixed(3)).join(', ')} · coordenadas reales = escena + offset`
       : '';
     this.projection.set(this.app.state.camera.type);
   }
@@ -144,8 +157,8 @@ export class TopBar {
     return [
       {
         icon: 'image',
-        label: 'Imagen PNG',
-        hint: `${views.render.width}×${views.render.height} px · encuadre del marco`,
+        label: 'PNG',
+        hint: `${views.render.width}×${views.render.height}`,
         run: guard(async () => {
           app.notify('Renderizando PNG…');
           await views.exportPng();
@@ -154,20 +167,20 @@ export class TopBar {
       },
       {
         icon: 'blender',
-        label: 'Script para Blender',
-        hint: 'blender_setup.py · cámaras, sol y luces por vista',
+        label: 'Script Blender',
+        hint: 'blender_setup.py',
         run: guard(() => views.exportBlenderScript()),
       },
       {
         icon: 'json',
         label: 'views.json',
-        hint: 'Vistas con coordenadas reales',
+        hint: 'coord. reales',
         run: guard(() => views.exportViewsJson()),
       },
       {
         icon: 'cube',
-        label: 'GLB con cámaras y luces',
-        hint: 'KHR_lights_punctual · luces de la vista activa',
+        label: 'GLB + cámaras y luces',
+        hint: 'KHR_lights',
         run: guard(() => {
           const skipped = views.exportGlbWithLights();
           if (skipped.length)
@@ -177,7 +190,7 @@ export class TopBar {
       {
         icon: 'upload',
         label: 'Importar views.json…',
-        hint: 'Añadir vistas guardadas',
+        hint: '',
         run: () =>
           pickFile('.json,application/json', (file) => {
             views
@@ -186,6 +199,14 @@ export class TopBar {
               .catch((e: unknown) => app.notify(`views.json no válido: ${String(e)}`, 'error'));
           }),
       },
+    ];
+  }
+
+  private menuEntry(iconName: IconName, label: string, hint: string): Element[] {
+    return [
+      icon(iconName, 14),
+      h('span', { class: 'menu-label-text', textContent: label }),
+      h('span', { class: 'menu-hint', textContent: hint }),
     ];
   }
 
@@ -199,13 +220,7 @@ export class TopBar {
       const entry = h(
         'button',
         { type: 'button', class: 'menu-item', attrs: { role: 'menuitem' } },
-        icon(item.icon),
-        h(
-          'span',
-          { class: 'menu-text' },
-          h('span', { textContent: item.label }),
-          h('small', { textContent: item.hint }),
-        ),
+        ...this.menuEntry(item.icon, item.label, item.hint),
       );
       entry.addEventListener('click', () => {
         this.menu.hidden = true;
@@ -214,9 +229,7 @@ export class TopBar {
       this.menu.append(entry);
     }
     if (this.downloads.length) {
-      this.menu.append(
-        h('div', { class: 'menu-label', textContent: 'Resultados de la conversión' }),
-      );
+      this.menu.append(h('div', { class: 'menu-section', textContent: 'Conversión' }));
       for (const link of this.downloads) {
         this.menu.append(
           h(
@@ -227,13 +240,7 @@ export class TopBar {
               download: link.filename,
               attrs: { role: 'menuitem' },
             },
-            icon('file'),
-            h(
-              'span',
-              { class: 'menu-text' },
-              h('span', { textContent: link.label }),
-              h('small', { textContent: link.filename }),
-            ),
+            ...this.menuEntry('file', link.label, link.filename),
           ),
         );
       }

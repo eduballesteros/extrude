@@ -42,16 +42,27 @@ let configYaml: { name: string; text: string } | null = null;
 
 const frame = new FrameOverlay(viewport);
 const topbar = new TopBar(app, views, {
-  onOpen: () => welcome.open(app.hasModel),
+  onClose: () => closeModel(),
   onToggleZen: () => toggleZen(),
 });
-new Sidebar('left', [
-  { id: 'views', label: 'Vistas', icon: 'views', panel: new ViewsPanel(app, views, frame).element },
-  { id: 'layers', label: 'Capas', icon: 'layers', panel: new LayersPanel(app).element },
+const viewsPanel = new ViewsPanel(app, views, frame);
+const layersPanel = new LayersPanel(app);
+const left = new Sidebar('left', [
+  { id: 'views', label: 'Vistas', panel: viewsPanel.element },
+  { id: 'layers', label: 'Capas', panel: layersPanel.element },
 ]);
-new Sidebar('right', [
-  { id: 'scene', label: 'Escena', icon: 'settings', panel: new Inspector(app).element },
-]);
+const syncCounts = (): void => {
+  left.setCount('views', viewsPanel.count);
+  left.setCount('layers', layersPanel.count);
+};
+views.on(syncCounts);
+app.on('model', syncCounts);
+syncCounts();
+new Sidebar(
+  'right',
+  [{ id: 'scene', label: 'Inspector', panel: new Inspector(app).element }],
+  'Inspector',
+);
 const cube = new ViewCubeWidget(app);
 viewport.append(cube.element, app.stats.element);
 
@@ -63,13 +74,24 @@ function toggleZen(force?: boolean): void {
 
 const welcome = new WelcomeScreen({
   onFile: (file) => void open(file),
-  onSample: (sample) => void open(sample.url, `${sample.title}.glb`.replace(/\s+/g, '_')),
+  onSample: (sample) => void open(sample.url, `${sample.title}.glb`.replace(/\s+/g, '_'), true),
   onClose: () => app.hasModel && welcome.close(),
 });
+
+function closeModel(): void {
+  if (welcome.isBusy) return;
+  app.unload();
+  topbar.setDownloads([]);
+  toggleZen(false);
+  document.body.classList.remove('has-model');
+  welcome.open(false);
+}
 
 function enterWorkspace(model: LoadedModel): void {
   topbar.setModel(model);
   document.body.classList.add('has-model');
+  // En pantallas estrechas los paneles se superponen: empezar con ellos ocultos (Tab los muestra)
+  if (window.matchMedia('(max-width: 820px)').matches) toggleZen(true);
   welcome.close();
 }
 
@@ -110,7 +132,7 @@ async function convertDrawing(file: File): Promise<LoadedModel> {
   return model;
 }
 
-async function open(source: string | File, name?: string): Promise<void> {
+async function open(source: string | File, name?: string, sample = false): Promise<void> {
   if (welcome.isBusy) return;
   if (source instanceof File && hasExtension(source.name, CONFIG_EXTENSIONS)) {
     configYaml = { name: source.name, text: await source.text() };
@@ -142,10 +164,13 @@ async function open(source: string | File, name?: string): Promise<void> {
     app.notify(`${model.name} cargado`, 'success');
   } catch (error) {
     if (!(error instanceof ConversionError)) console.error(error);
+    const message = error instanceof Error ? error.message : String(error);
     welcome.showError(
       error instanceof ConversionError
         ? `${error.message} ${error.fix}`
-        : `No se pudo cargar el modelo: ${error instanceof Error ? error.message : String(error)}`,
+        : sample && message.includes('HTTP 404')
+          ? `Ejemplo no encontrado (${typeof source === 'string' ? source : source.name}). Genera los GLB con "just convert-samples" y cópialos a viewer/public/models/.`
+          : `No se pudo cargar el modelo: ${message}`,
     );
   } finally {
     welcome.endProgress();
@@ -205,6 +230,19 @@ window.addEventListener('keydown', (e) => {
       e.preventDefault();
       toggleZen();
       break;
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9': {
+      const view = views.views[Number(e.key) - 1];
+      if (view) views.restore(view.id);
+      break;
+    }
     case ' ':
       if (app.state.sun.mode === 'datetime') {
         e.preventDefault();

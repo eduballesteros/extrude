@@ -1,6 +1,6 @@
 import type { App } from '../app';
 import { composeIso, splitIso, sunTimes } from '../scene/sun';
-import type { BackgroundMode, LightState, LightType, ToneMappingType } from '../state';
+import type { BackgroundMode, LightState, LightType, ShadowType, ToneMappingType } from '../state';
 import {
   button,
   colorField,
@@ -14,14 +14,23 @@ import {
   toggle,
 } from './dom';
 
-type ShadowQuality = 'off' | 'medium' | 'high';
-const QUALITY_SIZE: Record<Exclude<ShadowQuality, 'off'>, number> = { medium: 2048, high: 4096 };
+type ShadowMode = 'off' | ShadowType;
 const SPEEDS = [0.5, 1, 2, 4];
+const MAP_SIZES = [1024, 2048, 4096, 8192];
 const LIGHT_NAMES: Record<LightType, string> = { point: 'Puntual', spot: 'Foco', area: 'Área' };
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const DIAL = 40; // radio del dial solar (px)
 
-export function shadowQuality(enabled: boolean, mapSize: number): ShadowQuality {
-  if (!enabled) return 'off';
-  return mapSize >= QUALITY_SIZE.high ? 'high' : 'medium';
+export function shadowMode(enabled: boolean, type: ShadowType): ShadowMode {
+  return enabled ? type : 'off';
+}
+
+/** Exposición lineal ↔ pasos de diafragma (EV). */
+export function toEv(exposure: number): number {
+  return Math.log2(Math.max(exposure, 1e-6));
+}
+export function fromEv(ev: number): number {
+  return 2 ** ev;
 }
 
 export function formatHour(hours: number): string {
@@ -29,7 +38,54 @@ export function formatHour(hours: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-/** Panel derecho: sol, sombras, entorno, cámara/render y luces. */
+/**
+ * Posición del sol en el dial polar (px, y hacia abajo): norte real arriba, azimut horario y
+ * elevación hacia el centro (90° = cénit en el centro, 0° = horizonte en el borde).
+ */
+export function dialPoint(
+  azimuthDeg: number,
+  elevationDeg: number,
+  radius: number,
+): [number, number] {
+  const r = ((90 - Math.min(Math.max(elevationDeg, -10), 90)) / 90) * radius;
+  const a = (azimuthDeg * Math.PI) / 180;
+  return [Math.sin(a) * r, -Math.cos(a) * r];
+}
+
+/** Inversa de dialPoint (para fijar el sol a mano pulsando en el dial). */
+export function dialToSun(
+  x: number,
+  y: number,
+  radius: number,
+): { azimuthDeg: number; elevationDeg: number } {
+  const r = Math.min(Math.hypot(x, y), radius);
+  const az = ((Math.atan2(x, -y) * 180) / Math.PI + 360) % 360;
+  return { azimuthDeg: az, elevationDeg: 90 - (r / radius) * 90 };
+}
+
+function svgEl<K extends keyof SVGElementTagNameMap>(
+  tag: K,
+  attrs: Record<string, string>,
+): SVGElementTagNameMap[K] {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+function readout(label: string): { element: HTMLElement; value: HTMLElement } {
+  const value = h('span', { class: 'readout-value mono' });
+  return {
+    element: h(
+      'div',
+      { class: 'readout' },
+      h('span', { class: 'readout-label', textContent: label }),
+      value,
+    ),
+    value,
+  };
+}
+
+/** Panel derecho (inspector técnico): sol, sombras, entorno, postprocesado, cámara y luces. */
 export class Inspector {
   readonly element = h('div', { class: 'tab-panel inspector' });
   private readonly refreshers: (() => void)[] = [];
@@ -41,6 +97,7 @@ export class Inspector {
       this.sunSection(),
       this.shadowSection(),
       this.environmentSection(),
+      this.postSection(),
       this.cameraSection(),
       this.lightsSection(),
     );
@@ -53,21 +110,23 @@ export class Inspector {
     for (const r of this.refreshers) r();
   }
 
-  // --- Sol ---------------------------------------------------------------------
+  // --- Luz solar -----------------------------------------------------------------
 
   private sunSection(): HTMLElement {
     const { app } = this;
     const sun = app.state.sun;
-    const { element, body } = section('Sol', 'sun');
+    const clockAside = h('span', { class: 'section-aside mono' });
+    const { element, body } = section('Luz solar', true, clockAside);
 
-    const clock = h('span', { class: 'clock' });
-    const readout = h('span', { class: 'readout' });
+    // Hora: reloj mono + pista 00:00–24:00 con franja diurna y marcas de orto/ocaso
+    const clock = h('span', { class: 'clock mono' });
     const range = h('input', {
       type: 'range',
       min: '0',
       max: '24',
-      step: '0.05',
+      step: String(1 / 60),
       class: 'timeline-range',
+      attrs: { 'aria-label': 'Hora solar' },
     });
     const markers = h('div', { class: 'timeline-markers' });
     const track = h(
@@ -77,11 +136,10 @@ export class Inspector {
       markers,
       range,
     );
-    const play = button({
-      icon: 'play',
+    const play = h('button', {
+      type: 'button',
+      class: 'btn btn-ghost btn-sm btn-icon play',
       title: 'Reproducir el día (Espacio)',
-      variant: 'primary',
-      size: 'sm',
     });
     play.addEventListener('click', () => app.setPlaying(!app.animation.playing));
     const speed = segmented(
@@ -99,7 +157,56 @@ export class Inspector {
     };
     range.addEventListener('input', () => setTime({ hours: Number(range.value) }));
 
-    const date = h('input', { type: 'date', class: 'input' });
+    // Dial acimut/elevación
+    const dialSvg = svgEl('svg', {
+      viewBox: `${-DIAL - 8} ${-DIAL - 8} ${2 * DIAL + 16} ${2 * DIAL + 16}`,
+      class: 'sun-dial',
+      role: 'img',
+      'aria-label': 'Posición del sol',
+    });
+    dialSvg.append(
+      svgEl('circle', { r: String(DIAL), class: 'dial-horizon' }),
+      svgEl('circle', { r: String(DIAL * (2 / 3)), class: 'dial-ring' }),
+      svgEl('circle', { r: String(DIAL / 3), class: 'dial-ring' }),
+      svgEl('line', { x1: String(-DIAL), x2: String(DIAL), y1: '0', y2: '0', class: 'dial-ring' }),
+      svgEl('line', { y1: String(-DIAL), y2: String(DIAL), x1: '0', x2: '0', class: 'dial-ring' }),
+    );
+    const north = svgEl('text', { x: '0', y: String(-DIAL - 2), class: 'dial-n' });
+    north.textContent = 'N';
+    const sunRay = svgEl('line', { x1: '0', y1: '0', class: 'dial-ray' });
+    const sunDot = svgEl('circle', { r: '4', class: 'dial-sun' });
+    dialSvg.append(north, sunRay, sunDot);
+    const setFromDial = (e: PointerEvent): void => {
+      const rect = dialSvg.getBoundingClientRect();
+      const scale = (2 * DIAL + 16) / rect.width;
+      const x = (e.clientX - rect.left) * scale - DIAL - 8;
+      const y = (e.clientY - rect.top) * scale - DIAL - 8;
+      const pos = dialToSun(x, y, DIAL);
+      sun.mode = 'manual';
+      sun.azimuthDeg = Math.round(pos.azimuthDeg * 10) / 10;
+      sun.elevationDeg = Math.round(pos.elevationDeg * 10) / 10;
+      app.applySun();
+      this.refresh();
+    };
+    dialSvg.addEventListener('pointerdown', (e) => {
+      if (sun.mode !== 'manual') return;
+      dialSvg.setPointerCapture(e.pointerId);
+      setFromDial(e);
+      const move = (ev: PointerEvent): void => setFromDial(ev);
+      const up = (): void => {
+        dialSvg.removeEventListener('pointermove', move);
+        dialSvg.removeEventListener('pointerup', up);
+      };
+      dialSvg.addEventListener('pointermove', move);
+      dialSvg.addEventListener('pointerup', up);
+    });
+
+    const az = readout('Acimut');
+    const el = readout('Elevación');
+    const rise = readout('Orto');
+    const set = readout('Ocaso');
+
+    const date = h('input', { type: 'date', class: 'input mono' });
     date.addEventListener('change', () => {
       if (/^\d{4}-\d{2}-\d{2}$/.test(date.value)) setTime({ day: date.value });
     });
@@ -114,26 +221,33 @@ export class Inspector {
     );
     const coord = (label: string, key: 'lat' | 'lon', min: number, max: number): HTMLElement => {
       const input = h('input', {
-        type: 'number',
-        class: 'input',
-        step: '0.0001',
-        min: String(min),
-        max: String(max),
+        type: 'text',
+        inputMode: 'decimal',
+        class: 'input mono',
+        spellcheck: false,
       });
-      input.addEventListener('change', () => {
-        const v = Number(input.value);
-        if (Number.isFinite(v) && v >= min && v <= max) {
-          sun[key] = v;
-          app.applySun();
-          this.refresh();
-        }
+      const apply = (): void => {
+        const v = Number(input.value.trim().replace(',', '.'));
+        const ok = input.value.trim() !== '' && Number.isFinite(v) && v >= min && v <= max;
+        input.classList.toggle('is-invalid', !ok);
+        if (!ok) return;
+        sun[key] = v;
+        app.applySun();
+        this.refresh();
+      };
+      input.addEventListener('change', apply);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') input.blur();
       });
       this.refreshers.push(() => {
-        if (document.activeElement !== input) input.value = sun[key].toFixed(4);
+        if (document.activeElement !== input) {
+          input.value = sun[key].toFixed(4);
+          input.classList.remove('is-invalid');
+        }
       });
       return h(
         'label',
-        { class: 'field field-compact' },
+        { class: 'field' },
         h('span', { class: 'field-label', textContent: label }),
         input,
       );
@@ -145,46 +259,38 @@ export class Inspector {
       this.refresh();
     });
     const azimuth = slider({
-      label: 'Azimut',
+      label: 'Acimut',
       min: 0,
       max: 360,
-      step: 0.5,
+      step: 0.1,
       value: sun.azimuthDeg,
       unit: '°',
       digits: 1,
-      onInput: (v) => ((sun.azimuthDeg = v), app.applySun()),
+      onInput: (v) => ((sun.azimuthDeg = v), app.applySun(), this.refresh()),
     });
     const elevation = slider({
       label: 'Elevación',
       min: -10,
       max: 90,
-      step: 0.5,
+      step: 0.1,
       value: sun.elevationDeg,
       unit: '°',
       digits: 1,
-      onInput: (v) => ((sun.elevationDeg = v), app.applySun()),
+      onInput: (v) => ((sun.elevationDeg = v), app.applySun(), this.refresh()),
     });
     const manualBox = h('div', { class: 'stack' }, azimuth.element, elevation.element);
     const datetimeBox = h(
       'div',
       { class: 'stack' },
       h(
-        'div',
-        { class: 'grid-2' },
-        h(
-          'label',
-          { class: 'field field-compact' },
-          h('span', { class: 'field-label', textContent: 'Fecha' }),
-          date,
-        ),
-        utc.element,
+        'label',
+        { class: 'field' },
+        h('span', { class: 'field-label', textContent: 'Fecha' }),
+        date,
       ),
-      h(
-        'div',
-        { class: 'grid-2' },
-        coord('Latitud', 'lat', -90, 90),
-        coord('Longitud', 'lon', -180, 180),
-      ),
+      utc.element,
+      coord('Latitud', 'lat', -90, 90),
+      coord('Longitud', 'lon', -180, 180),
     );
     const intensity = slider({
       label: 'Intensidad',
@@ -204,7 +310,7 @@ export class Inspector {
       digits: 0,
       onInput: (v) => ((sun.colorTempK = v), app.applySun()),
     });
-    const north = slider({
+    const northRot = slider({
       label: 'Norte real',
       min: -180,
       max: 180,
@@ -218,67 +324,69 @@ export class Inspector {
     this.refreshers.push(() => {
       const { day, hours, utcOffsetH } = splitIso(sun.isoDate);
       const isManual = sun.mode === 'manual';
-      clock.textContent = isManual ? 'Manual' : formatHour(hours);
-      readout.textContent = `Az ${sun.azimuthDeg.toFixed(1)}° · El ${sun.elevationDeg.toFixed(1)}°`;
+      clock.textContent = isManual ? '--:--' : formatHour(hours);
+      clockAside.textContent = isManual
+        ? 'MANUAL'
+        : `${formatHour(hours)} UTC${utcOffsetH >= 0 ? '+' : '−'}${Math.abs(utcOffsetH)}`;
+      az.value.textContent = `${sun.azimuthDeg.toFixed(1)}°`;
+      el.value.textContent = `${sun.elevationDeg.toFixed(1)}°`;
       range.value = String(hours);
       range.disabled = isManual;
       range.style.setProperty('--fill', `${(hours / 24) * 100}%`);
       if (document.activeElement !== date) date.value = day;
       utc.set(String(utcOffsetH));
-      play.replaceChildren(icon(app.animation.playing ? 'pause' : 'play'));
+      play.replaceChildren(icon(app.animation.playing ? 'pause' : 'play', 14));
+      play.classList.toggle('is-active', app.animation.playing);
       play.disabled = isManual;
       manual.set(isManual);
       manualBox.hidden = !isManual;
       datetimeBox.hidden = isManual;
+      dialSvg.classList.toggle('is-editable', isManual);
       azimuth.set(sun.azimuthDeg);
       elevation.set(sun.elevationDeg);
       intensity.set(sun.intensity);
       temp.set(sun.colorTempK);
-      north.set(sun.northRotationDeg);
+      northRot.set(sun.northRotationDeg);
+      const [x, y] = dialPoint(sun.azimuthDeg, sun.elevationDeg, DIAL);
+      sunDot.setAttribute('cx', x.toFixed(1));
+      sunDot.setAttribute('cy', y.toFixed(1));
+      sunRay.setAttribute('x2', x.toFixed(1));
+      sunRay.setAttribute('y2', y.toFixed(1));
+      dialSvg.classList.toggle('is-night', sun.elevationDeg <= 0);
       const times = sunTimes(day, sun.lat, sun.lon, utcOffsetH);
-      const mark = (
-        hour: number | null,
-        iconName: 'sunrise' | 'sunset',
-        label: string,
-      ): HTMLElement | null =>
+      rise.value.textContent = times.sunrise === null ? '—' : formatHour(times.sunrise);
+      set.value.textContent = times.sunset === null ? '—' : formatHour(times.sunset);
+      const mark = (hour: number | null): HTMLElement | null =>
         hour === null
           ? null
-          : h(
-              'span',
-              {
-                class: 'timeline-marker',
-                title: `${label} ${formatHour(hour)}`,
-                attrs: { style: `left:${(hour / 24) * 100}%` },
-              },
-              icon(iconName, 12),
-            );
+          : h('span', { class: 'timeline-marker', attrs: { style: `left:${(hour / 24) * 100}%` } });
       markers.replaceChildren(
-        ...[
-          mark(times.sunrise, 'sunrise', 'Amanecer'),
-          mark(times.sunset, 'sunset', 'Ocaso'),
-        ].filter((m): m is HTMLElement => m !== null),
+        ...[mark(times.sunrise), mark(times.sunset)].filter((m): m is HTMLElement => m !== null),
       );
-      const day0 = times.sunrise ?? 0;
-      const day1 = times.sunset ?? 24;
-      track.style.setProperty('--day-start', `${(day0 / 24) * 100}%`);
-      track.style.setProperty('--day-end', `${(day1 / 24) * 100}%`);
+      track.style.setProperty('--day-start', `${((times.sunrise ?? 0) / 24) * 100}%`);
+      track.style.setProperty('--day-end', `${((times.sunset ?? 24) / 24) * 100}%`);
     });
 
     body.append(
-      h('div', { class: 'sun-header' }, clock, readout),
+      h('div', { class: 'time-row' }, play, clock, speed.element),
       track,
       h(
         'div',
-        { class: 'timeline-scale' },
-        ...['0', '6', '12', '18', '24'].map((t) => h('span', { textContent: t })),
+        { class: 'timeline-scale mono' },
+        ...['00', '06', '12', '18', '24'].map((t) => h('span', { textContent: t })),
       ),
-      h('div', { class: 'row' }, play, speed.element),
+      h(
+        'div',
+        { class: 'dial-row' },
+        dialSvg,
+        h('div', { class: 'readouts' }, az.element, el.element, rise.element, set.element),
+      ),
       datetimeBox,
       manual.element,
       manualBox,
       intensity.element,
       temp.element,
-      north.element,
+      northRot.element,
     );
     return element;
   }
@@ -288,30 +396,55 @@ export class Inspector {
   private shadowSection(): HTMLElement {
     const { app } = this;
     const s = app.state.shadows;
-    const { element, body } = section('Sombras', 'shadow');
-    const quality = segmented<ShadowQuality>(
+    const { element, body } = section('Sombras');
+    const mode = segmented<ShadowMode>(
       [
-        { value: 'off', label: 'No' },
-        { value: 'medium', label: 'Media 2K' },
-        { value: 'high', label: 'Alta 4K' },
+        { value: 'off', label: 'Apagadas' },
+        { value: 'pcf', label: 'PCF', title: 'Percentage-closer filtering' },
+        { value: 'vsm', label: 'VSM', title: 'Variance shadow maps (más suaves)' },
       ],
-      shadowQuality(s.enabled, s.mapSize),
-      (q) => {
-        s.enabled = q !== 'off';
-        if (q !== 'off') s.mapSize = QUALITY_SIZE[q];
+      shadowMode(s.enabled, s.type),
+      (m) => {
+        s.enabled = m !== 'off';
+        if (m !== 'off') s.type = m;
         app.applyShadows();
         this.refresh();
       },
     );
-    const softness = slider({
-      label: 'Suavizado',
+    mode.element.classList.add('segmented-full');
+    const radius = slider({
+      label: 'Radio',
       min: 0,
       max: 10,
-      step: 0.5,
+      step: 0.1,
       value: s.radius,
       digits: 1,
       onInput: (v) => ((s.radius = v), app.applyShadows()),
     });
+    const bias = slider({
+      label: 'Sesgo',
+      min: -0.005,
+      max: 0.005,
+      step: 0.0001,
+      value: s.bias,
+      digits: 4,
+      onInput: (v) => ((s.bias = v), app.applyShadows()),
+    });
+    const normalBias = slider({
+      label: 'Sesgo normal',
+      min: 0,
+      max: 0.5,
+      step: 0.005,
+      value: s.normalBias,
+      digits: 3,
+      onInput: (v) => ((s.normalBias = v), app.applyShadows()),
+    });
+    const size = select(
+      'Mapa',
+      MAP_SIZES.map((n) => ({ value: String(n), label: `${n} px` })),
+      String(s.mapSize),
+      (v) => ((s.mapSize = Number(v)), app.applyShadows()),
+    );
     const fit = select(
       'Ajuste',
       [
@@ -322,61 +455,25 @@ export class Inspector {
       s.fit,
       (v) => ((s.fit = v), app.applyShadows()),
     );
-    const bias = slider({
-      label: 'Bias',
-      min: -0.005,
-      max: 0.005,
-      step: 0.0001,
-      value: s.bias,
-      digits: 4,
-      onInput: (v) => ((s.bias = v), app.applyShadows()),
-    });
-    const normalBias = slider({
-      label: 'Normal bias',
-      min: 0,
-      max: 0.5,
-      step: 0.005,
-      value: s.normalBias,
-      digits: 3,
-      onInput: (v) => ((s.normalBias = v), app.applyShadows()),
-    });
-    const filter = segmented(
-      [
-        { value: 'pcf', label: 'PCF' },
-        { value: 'vsm', label: 'VSM' },
-      ],
-      s.type,
-      (v) => ((s.type = v), app.applyShadows()),
-    );
-    const advanced = h(
-      'details',
-      { class: 'advanced' },
-      h('summary', { textContent: 'Avanzado' }),
-      h(
-        'div',
-        { class: 'stack' },
-        fit.element,
-        h(
-          'div',
-          { class: 'field' },
-          h('span', { class: 'field-label', textContent: 'Filtro' }),
-          filter.element,
-        ),
-        bias.element,
-        normalBias.element,
-      ),
+    const options = h(
+      'div',
+      { class: 'stack' },
+      radius.element,
+      bias.element,
+      normalBias.element,
+      size.element,
+      fit.element,
     );
     this.refreshers.push(() => {
-      quality.set(shadowQuality(s.enabled, s.mapSize));
-      softness.set(s.radius);
-      fit.set(s.fit);
-      filter.set(s.type);
+      mode.set(shadowMode(s.enabled, s.type));
+      radius.set(s.radius);
       bias.set(s.bias);
       normalBias.set(s.normalBias);
-      softness.element.hidden = !s.enabled;
-      advanced.hidden = !s.enabled;
+      size.set(String(s.mapSize));
+      fit.set(s.fit);
+      options.hidden = !s.enabled;
     });
-    body.append(quality.element, softness.element, advanced);
+    body.append(mode.element, options);
     return element;
   }
 
@@ -385,39 +482,33 @@ export class Inspector {
   private environmentSection(): HTMLElement {
     const { app } = this;
     const a = app.state.ambient;
-    const { element, body } = section('Entorno', 'globe');
-    const apply = (): void => {
-      app.applyAmbient();
-      this.refresh();
-    };
+    const { element, body } = section('Entorno');
     const background = segmented<BackgroundMode>(
       [
-        { value: 'sky', label: 'Cielo', icon: 'sky' },
-        { value: 'color', label: 'Color', icon: 'palette' },
-        { value: 'hdri', label: 'HDRI', icon: 'globe' },
+        { value: 'sky', label: 'Cielo procedural' },
+        { value: 'color', label: 'Color' },
+        { value: 'hdri', label: 'HDRI' },
       ],
       a.background,
-      (mode) => {
-        if (mode === 'hdri' && !app.hdriName) {
+      (m) => {
+        if (m === 'hdri' && !app.hdriName) {
           this.loadHdri();
+          this.refresh();
           return;
         }
-        a.background = mode;
-        apply();
+        a.background = m;
+        app.applyAmbient();
+        this.refresh();
       },
     );
+    background.element.classList.add('segmented-full');
     const color = colorField(
-      'Color de fondo',
+      'Fondo',
       a.backgroundColor,
       (v) => ((a.backgroundColor = v), app.applyAmbient()),
     );
-    const hdriName = h('span', { class: 'muted ellipsis' });
-    const hdriLoad = button({
-      label: 'Cargar HDRI…',
-      icon: 'upload',
-      size: 'sm',
-      onClick: () => this.loadHdri(),
-    });
+    const hdriName = h('span', { class: 'mono ellipsis muted' });
+    const hdriLoad = button({ label: 'Cargar…', size: 'sm', onClick: () => this.loadHdri() });
     const hdriRotation = slider({
       label: 'Rotación',
       min: -180,
@@ -429,7 +520,7 @@ export class Inspector {
       onInput: (v) => ((a.hdriRotationDeg = v), app.applyAmbient()),
     });
     const hdriIntensity = slider({
-      label: 'Intensidad HDRI',
+      label: 'Intensidad',
       min: 0,
       max: 5,
       step: 0.05,
@@ -439,12 +530,17 @@ export class Inspector {
     const hdriBox = h(
       'div',
       { class: 'stack' },
-      h('div', { class: 'row' }, hdriLoad, hdriName),
+      h(
+        'div',
+        { class: 'field' },
+        h('span', { class: 'field-label', textContent: 'Archivo' }),
+        h('div', { class: 'row' }, hdriName, hdriLoad),
+      ),
       hdriRotation.element,
       hdriIntensity.element,
     );
     const ambient = slider({
-      label: 'Luz ambiente',
+      label: 'Ambiente',
       min: 0,
       max: 3,
       step: 0.05,
@@ -460,7 +556,7 @@ export class Inspector {
       color.set(a.backgroundColor);
       color.element.hidden = a.background !== 'color';
       hdriBox.hidden = a.background !== 'hdri';
-      hdriName.textContent = app.hdriName ?? 'Ninguno';
+      hdriName.textContent = app.hdriName ?? '—';
       hdriRotation.set(a.hdriRotationDeg);
       hdriIntensity.set(a.hdriIntensity);
       ambient.set(a.intensity);
@@ -479,13 +575,56 @@ export class Inspector {
     });
   }
 
-  // --- Cámara y render ---------------------------------------------------------
+  // --- Postprocesado -----------------------------------------------------------
+
+  private postSection(): HTMLElement {
+    const { app } = this;
+    const t = app.state.tonemapping;
+    const { element, body } = section('Postprocesado');
+    const tone = segmented<ToneMappingType>(
+      [
+        { value: 'agx', label: 'AgX' },
+        { value: 'aces', label: 'ACES', title: 'ACES Filmic' },
+        { value: 'neutral', label: 'Neutral', title: 'Khronos PBR Neutral' },
+        { value: 'none', label: 'Lineal', title: 'Sin tone mapping' },
+      ],
+      t.type,
+      (v) => ((t.type = v), app.applyToneMapping()),
+    );
+    tone.element.classList.add('segmented-full');
+    const exposure = slider({
+      label: 'Exposición',
+      min: -4,
+      max: 4,
+      step: 0.1,
+      value: toEv(t.exposure),
+      unit: 'EV',
+      digits: 1,
+      onInput: (ev) => ((t.exposure = fromEv(ev)), app.applyToneMapping()),
+    });
+    this.refreshers.push(() => {
+      tone.set(t.type);
+      exposure.set(Math.round(toEv(t.exposure) * 10) / 10);
+    });
+    body.append(
+      h(
+        'div',
+        { class: 'field' },
+        h('span', { class: 'field-label', textContent: 'Tone mapping' }),
+      ),
+      tone.element,
+      exposure.element,
+    );
+    return element;
+  }
+
+  // --- Cámara ------------------------------------------------------------------
 
   private cameraSection(): HTMLElement {
     const { app } = this;
-    const { element, body } = section('Cámara y render', 'camera');
+    const { element, body } = section('Cámara', false);
     const fov = slider({
-      label: 'Campo de visión',
+      label: 'FOV vertical',
       min: 10,
       max: 100,
       step: 1,
@@ -497,39 +636,25 @@ export class Inspector {
         app.applyCamera();
       },
     });
-    const tone = select<ToneMappingType>(
-      'Tone mapping',
-      [
-        { value: 'agx', label: 'AgX' },
-        { value: 'aces', label: 'ACES Filmic' },
-        { value: 'neutral', label: 'Khronos Neutral' },
-        { value: 'none', label: 'Ninguno' },
-      ],
-      app.state.tonemapping.type,
-      (v) => ((app.state.tonemapping.type = v), app.applyToneMapping()),
-    );
-    const exposure = slider({
-      label: 'Exposición',
-      min: 0.1,
-      max: 4,
-      step: 0.05,
-      value: app.state.tonemapping.exposure,
-      onInput: (v) => ((app.state.tonemapping.exposure = v), app.applyToneMapping()),
-    });
     const fly = button({
       label: 'Modo vuelo',
-      icon: 'camera',
       size: 'sm',
-      title: 'WASD para moverse, Q/E bajar/subir, Shift rápido, Esc salir',
+      title: 'WASD para moverse, Q/E bajar/subir, Mayús rápido, Esc salir',
       onClick: () => app.nav.startFly(),
     });
     this.refreshers.push(() => {
       fov.set(app.state.camera.fovDeg);
       fov.element.hidden = app.state.camera.type !== 'perspective';
-      tone.set(app.state.tonemapping.type);
-      exposure.set(app.state.tonemapping.exposure);
     });
-    body.append(fov.element, tone.element, exposure.element, fly);
+    body.append(
+      fov.element,
+      h(
+        'div',
+        { class: 'row' },
+        fly,
+        h('span', { class: 'muted small', textContent: 'WASD · Q/E · Esc' }),
+      ),
+    );
     return element;
   }
 
@@ -537,12 +662,14 @@ export class Inspector {
 
   private lightsSection(): HTMLElement {
     const { app } = this;
-    const { element, body } = section('Luces', 'bulb', false);
+    const count = h('span', { class: 'section-aside mono' });
+    const { element, body } = section('Luces', false, count);
     const add = (type: LightType): HTMLButtonElement =>
       button({
         label: LIGHT_NAMES[type],
         icon: 'plus',
         size: 'sm',
+        variant: 'ghost',
         title: `Haz clic en la escena para colocar una luz ${LIGHT_NAMES[type].toLowerCase()}`,
         onClick: () => {
           app.placing = type;
@@ -552,18 +679,19 @@ export class Inspector {
         },
       });
     this.refreshers.push(() => {
+      count.textContent = String(app.state.lights.length);
       const ids = app.state.lights.map((l) => l.id).join();
       if (ids === this.lightIds) return;
       this.lightIds = ids;
       this.lightsList.replaceChildren(...app.state.lights.map((l, i) => this.lightCard(l, i)));
       if (app.state.lights.length === 0) {
         this.lightsList.append(
-          h('p', { class: 'muted small', textContent: 'Sin luces adicionales.' }),
+          h('p', { class: 'muted small', textContent: 'Sin luces adicionales' }),
         );
       }
     });
     body.append(
-      h('div', { class: 'row wrap' }, add('point'), add('spot'), add('area')),
+      h('div', { class: 'row' }, add('point'), add('spot'), add('area')),
       this.lightsList,
     );
     return element;
@@ -642,8 +770,8 @@ export class Inspector {
       h(
         'summary',
         {},
-        icon('bulb', 14),
-        h('span', { textContent: `${index + 1}. ${LIGHT_NAMES[light.type]}` }),
+        h('span', { class: 'mono muted', textContent: String(index + 1).padStart(2, '0') }),
+        h('span', { textContent: LIGHT_NAMES[light.type] }),
         h(
           'span',
           { class: 'row-actions' },

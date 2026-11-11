@@ -1,5 +1,6 @@
 import {
   type Box3,
+  Group,
   type Mesh,
   type Object3D,
   Raycaster,
@@ -104,7 +105,8 @@ export class App {
     container.append(this.info.element);
 
     this.bindPointer();
-    window.addEventListener('resize', () => this.resize());
+    // Los paneles acoplados cambian el tamaño del visor sin redimensionar la ventana
+    new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
     this.applyAll();
     this.renderer.setAnimationLoop((now: number) => this.frame(now));
@@ -141,6 +143,28 @@ export class App {
     await nextFrame();
     this.setModel(model);
     return model;
+  }
+
+  /** Cierra el modelo y libera su memoria de GPU (vuelta a la pantalla de inicio). */
+  unload(): void {
+    const model = this.model;
+    if (!model) return;
+    this.scene.remove(model.root);
+    model.root.traverse((o: Object3D) => {
+      const mesh = o as Mesh;
+      if (!mesh.isMesh) return;
+      mesh.geometry.dispose();
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of materials) m.dispose();
+    });
+    this.model = null;
+    this.animation.playing = false;
+    this.layers.attach(new Group());
+    this.state.layers = {};
+    this.info.hide();
+    this.renderer.clear();
+    this.emit('model');
+    this.emit('state');
   }
 
   /** Reproduce o pausa la animación del día (y avisa a la interfaz). */

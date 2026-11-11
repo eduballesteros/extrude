@@ -110,47 +110,125 @@ export interface SliderOptions {
   onInput: (value: number) => void;
 }
 
-/** Fila con etiqueta, deslizador y valor numérico editable. */
+/**
+ * Interpreta lo tecleado en un campo numérico: admite coma decimal y espacios; devuelve null si
+ * no es un número finito. El valor se ajusta a [min, max] y al paso.
+ */
+export function parseNumeric(text: string, min: number, max: number, step: number): number | null {
+  const cleaned = text.trim().replace(/\s+/g, '').replace(',', '.');
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(cleaned)) return null;
+  const raw = Number(cleaned);
+  if (!Number.isFinite(raw)) return null;
+  const clamped = Math.min(Math.max(raw, min), max);
+  const snapped = Math.round((clamped - min) / step) * step + min;
+  return Number(Math.min(snapped, max).toFixed(10));
+}
+
+export function formatValue(v: number, digits: number): string {
+  return v.toFixed(digits);
+}
+
+/**
+ * Fila CAD: etiqueta a la izquierda (arrastrable para variar el valor), pista fina y valor
+ * numérico en monoespaciada a la derecha, editable por teclado con validación (Enter aplica,
+ * Esc descarta, ↑/↓ suman un paso; Mayús ×10).
+ */
 export function slider(options: SliderOptions): { element: HTMLElement; set: (v: number) => void } {
   const { label, min, max, step, unit = '', digits = 2, onInput } = options;
+  let current = options.value;
   const range = h('input', {
     type: 'range',
     min: String(min),
     max: String(max),
     step: String(step),
+    tabIndex: -1,
   });
   const number = h('input', {
-    type: 'number',
-    min: String(min),
-    max: String(max),
-    step: String(step),
+    type: 'text',
+    inputMode: 'decimal',
+    spellcheck: false,
     class: 'num',
+    attrs: { 'aria-label': label },
   });
-  const paint = (v: number): void => {
+  const set = (v: number): void => {
+    current = v;
+    range.value = String(v);
+    if (document.activeElement !== number) number.value = formatValue(v, digits);
+    number.classList.remove('is-invalid');
     const pct = ((v - min) / (max - min)) * 100;
     range.style.setProperty('--fill', `${Math.min(Math.max(pct, 0), 100)}%`);
   };
-  const set = (v: number): void => {
-    range.value = String(v);
-    number.value = v.toFixed(digits).replace(/\.?0+$/, '') || '0';
-    paint(v);
+  const commit = (v: number): void => {
+    set(v);
+    onInput(v);
   };
-  range.addEventListener('input', () => {
-    const v = Number(range.value);
-    set(v);
-    onInput(v);
+  range.addEventListener('input', () => commit(Number(range.value)));
+  const applyText = (): void => {
+    const v = parseNumeric(number.value, min, max, step);
+    if (v === null) {
+      number.classList.add('is-invalid');
+      return;
+    }
+    commit(v);
+    number.value = formatValue(v, digits);
+  };
+  number.addEventListener('change', applyText);
+  number.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      applyText();
+      number.blur();
+    } else if (e.key === 'Escape') {
+      number.value = formatValue(current, digits);
+      number.classList.remove('is-invalid');
+      number.blur();
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      const delta = (e.key === 'ArrowUp' ? step : -step) * (e.shiftKey ? 10 : 1);
+      const v = parseNumeric(String(current + delta), min, max, step);
+      if (v !== null) {
+        commit(v);
+        number.value = formatValue(v, digits);
+      }
+    }
   });
-  number.addEventListener('change', () => {
-    const v = Math.min(Math.max(Number(number.value), min), max);
-    if (Number.isNaN(v)) return;
-    set(v);
-    onInput(v);
+  number.addEventListener('blur', () => {
+    if (!number.classList.contains('is-invalid')) number.value = formatValue(current, digits);
   });
+  number.addEventListener('focus', () => number.select());
+
+  // Arrastre horizontal sobre la etiqueta (como en Blender/Figma): 1 px = 1 paso
+  const labelEl = h('span', { class: 'field-label scrub', textContent: label, title: label });
+  labelEl.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startValue = current;
+    labelEl.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent): void => {
+      const pxPerStep = ev.shiftKey ? 0.2 : 1;
+      const v = parseNumeric(
+        String(startValue + ((ev.clientX - startX) / pxPerStep) * step),
+        min,
+        max,
+        step,
+      );
+      if (v !== null && v !== current) commit(v);
+    };
+    const up = (): void => {
+      labelEl.removeEventListener('pointermove', move);
+      labelEl.removeEventListener('pointerup', up);
+      labelEl.removeEventListener('pointercancel', up);
+    };
+    labelEl.addEventListener('pointermove', move);
+    labelEl.addEventListener('pointerup', up);
+    labelEl.addEventListener('pointercancel', up);
+  });
+
   set(options.value);
   const element = h(
-    'label',
+    'div',
     { class: 'field field-slider' },
-    h('span', { class: 'field-label', textContent: label }),
+    labelEl,
     range,
     h(
       'span',
@@ -214,11 +292,11 @@ export function select<T extends string>(
   return { element, set: (v) => (el.value = v) };
 }
 
-/** Sección plegable con cabecera e icono. */
+/** Sección plegable con cabecera compacta; `aside` es un nodo opcional a la derecha. */
 export function section(
   title: string,
-  iconName: IconName,
   open = true,
+  aside?: Node,
 ): {
   element: HTMLElement;
   body: HTMLElement;
@@ -227,9 +305,9 @@ export function section(
   const header = h(
     'button',
     { type: 'button', class: 'section-header', attrs: { 'aria-expanded': String(open) } },
-    icon(iconName),
-    h('span', { textContent: title }),
-    icon('chevron-down', 14),
+    icon('chevron-down', 12),
+    h('span', { class: 'section-title', textContent: title }),
+    aside ?? null,
   );
   const element = h('section', { class: `section${open ? '' : ' is-collapsed'}` }, header, body);
   header.addEventListener('click', () => {
@@ -246,6 +324,15 @@ export function pickFile(accept: string, onFile: (file: File) => void): void {
     if (file) onFile(file);
   });
   input.click();
+}
+
+/** 1 400 000 → "1.4M", 12 300 → "12.3K" (para lecturas mono compactas). */
+export function compactNumber(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `${(value / 1e9).toFixed(1)}G`;
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (abs >= 1e4) return `${(value / 1e3).toFixed(1)}K`;
+  return String(Math.round(value));
 }
 
 export function formatNumber(value: number, digits = 0): string {

@@ -2,20 +2,34 @@ import type { Vector3 } from 'three';
 import type { PickInfo } from '../scene/picking';
 import { button, h } from './dom';
 
-const KIND_LABEL: Record<string, string> = {
-  building: 'Edificio',
-  road: 'Vial',
-  water: 'Agua',
-  vegetation: 'Vegetación',
-  terrain: 'Terreno',
-  line: 'Líneas',
-};
+/** Filas principales de la tarjeta: etiqueta visible ← campo de picking, con formato. */
+const meters =
+  (digits: number) =>
+  (v: string): string =>
+    Number.isFinite(Number(v)) ? `${Number(v).toFixed(digits)} m` : v;
+const PRIMARY: [string, string, (v: string) => string][] = [
+  ['Altura', 'Altura (m)', meters(1)],
+  ['Plantas', 'Plantas', (v) => v],
+  ['Cota', 'Cota base (m)', meters(2)],
+  ['Handle', 'Handle', (v) => `#${v.replace(/^#/, '').toUpperCase()}`],
+];
+const SKIP = new Set(PRIMARY.map(([, key]) => key));
 
-/** Campos destacados (en este orden) y el resto como detalles. */
-const HIGHLIGHT = ['Altura (m)', 'Plantas', 'Cota base (m)'];
+/** Pares (etiqueta, valor) de la tarjeta, sin vacíos. Exportado para test. */
+export function primaryRows(info: PickInfo): [string, string][] {
+  const values = new Map(info.fields);
+  const rows: [string, string][] = [['Capa', info.layer ?? '—']];
+  for (const [label, key, fmt] of PRIMARY) {
+    const value = values.get(key);
+    if (value === undefined || value === '—' || value === '') continue;
+    rows.push([label, fmt(value)]);
+  }
+  return rows;
+}
 
 /**
- * Tarjeta de inspección del objeto seleccionado. Solo textContent: los datos vienen del DWG.
+ * Tarjeta flotante mínima del objeto seleccionado (esquina inferior derecha). Solo textContent:
+ * los datos vienen del DWG.
  */
 export class InfoPanel {
   readonly element = h('aside', {
@@ -29,28 +43,21 @@ export class InfoPanel {
 
   show(info: PickInfo): void {
     this.point = info.point.clone();
-    const values = new Map(info.fields);
-    const stat = (label: string, short: string): HTMLElement | null => {
-      const value = values.get(label);
-      return value && value !== '—'
-        ? h(
-            'div',
-            { class: 'stat' },
-            h('span', { class: 'stat-value', textContent: value }),
-            h('span', { class: 'stat-label', textContent: short }),
-          )
-        : null;
-    };
-    const stats = [
-      stat('Altura (m)', 'altura m'),
-      stat('Plantas', 'plantas'),
-      stat('Cota base (m)', 'cota m'),
-    ].filter((s): s is HTMLElement => s !== null);
-    const details = h('dl', { class: 'details' });
-    for (const [key, value] of info.fields) {
-      if (HIGHLIGHT.includes(key)) continue;
-      details.append(h('dt', { textContent: key }), h('dd', { textContent: value }));
+    const list = h('dl', { class: 'kv' });
+    for (const [label, value] of primaryRows(info)) {
+      list.append(h('dt', { textContent: label }), h('dd', { textContent: value, title: value }));
     }
+    const details = h('dl', { class: 'kv' });
+    for (const [key, value] of info.fields) {
+      if (SKIP.has(key)) continue;
+      details.append(h('dt', { textContent: key }), h('dd', { textContent: value, title: value }));
+    }
+    const focus = button({
+      label: 'Enfocar',
+      variant: 'ghost',
+      size: 'sm',
+      onClick: () => this.point && this.onFocus(this.point),
+    });
     const close = button({
       icon: 'close',
       title: 'Cerrar',
@@ -58,29 +65,10 @@ export class InfoPanel {
       size: 'sm',
       onClick: () => this.hide(),
     });
-    const focus = button({
-      label: 'Enfocar',
-      icon: 'focus',
-      variant: 'primary',
-      size: 'sm',
-      onClick: () => this.point && this.onFocus(this.point),
-    });
     this.element.replaceChildren(
-      h(
-        'header',
-        {},
-        h('span', { class: 'kind-dot', data: { kind: info.kind ?? 'unknown' } }),
-        h(
-          'div',
-          { class: 'inspect-title' },
-          h('strong', { textContent: info.layer ?? 'Sin capa' }),
-          h('span', { textContent: KIND_LABEL[info.kind ?? ''] ?? info.kind ?? '' }),
-        ),
-        close,
-      ),
-      stats.length ? h('div', { class: 'stats-row' }, ...stats) : '',
-      h('details', { class: 'advanced' }, h('summary', { textContent: 'Detalles' }), details),
-      h('footer', {}, focus),
+      h('header', {}, h('span', { textContent: 'Selección' }), focus, close),
+      list,
+      h('details', {}, h('summary', { textContent: 'Más datos' }), details),
     );
     this.element.hidden = false;
   }

@@ -1,30 +1,34 @@
 import type { App } from '../app';
-import { RENDER_PRESETS, type ViewManager } from '../views/viewManager';
+import type { ViewManager } from '../views/viewManager';
 import type { SceneView } from '../views/viewState';
-import { button, h, icon, toggle } from './dom';
+import { button, h, icon, segmented, toggle } from './dom';
 import type { FrameOverlay } from './frameOverlay';
 
 /** Tiempo para confirmar un borrado con un segundo clic (sin diálogos modales). */
 const CONFIRM_MS = 3000;
 const MAX_RENDER_PX = 16384;
 
-/** Pestaña Vistas: formato de render, marco de cámara y tarjetas de vistas guardadas. */
+/** Formatos rápidos de render (la anchura/altura exactas siguen siendo editables). */
+export const RENDER_FORMATS = [
+  { value: '16:9', width: 3840, height: 2160, title: '3840×2160 (4K UHD)' },
+  { value: '4:3', width: 2880, height: 2160, title: '2880×2160' },
+  { value: 'A3', width: 4961, height: 3508, title: 'A3 apaisado a 300 ppp · 4961×3508' },
+  { value: '1:1', width: 2048, height: 2048, title: '2048×2048' },
+] as const;
+type FormatId = (typeof RENDER_FORMATS)[number]['value'] | '';
+
+/** Formato rápido que corresponde a un tamaño, o '' si es personalizado. */
+export function formatOf(width: number, height: number): FormatId {
+  return RENDER_FORMATS.find((f) => f.width === width && f.height === height)?.value ?? '';
+}
+
+/** Pestaña Vistas: formato de render, marco de cámara y lista compacta de vistas guardadas. */
 export class ViewsPanel {
   readonly element = h('div', { class: 'tab-panel' });
   private readonly list = h('ol', { class: 'view-list' });
-  private readonly preset = h('select', { class: 'select', title: 'Formato de render' });
-  private readonly width = h('input', {
-    type: 'number',
-    class: 'num',
-    min: '16',
-    max: String(MAX_RENDER_PX),
-  });
-  private readonly height = h('input', {
-    type: 'number',
-    class: 'num',
-    min: '16',
-    max: String(MAX_RENDER_PX),
-  });
+  private readonly width = h('input', { type: 'text', inputMode: 'numeric', class: 'input num' });
+  private readonly height = h('input', { type: 'text', inputMode: 'numeric', class: 'input num' });
+  private readonly format: ReturnType<typeof segmented<FormatId>>;
   private readonly frameToggle: ReturnType<typeof toggle>;
 
   constructor(
@@ -32,23 +36,28 @@ export class ViewsPanel {
     private readonly views: ViewManager,
     private readonly frame: FrameOverlay,
   ) {
-    this.preset.append(h('option', { value: '', textContent: 'Personalizado' }));
-    RENDER_PRESETS.forEach((p, i) =>
-      this.preset.append(
-        h('option', { value: String(i), textContent: `${p.label} · ${p.width}×${p.height}` }),
-      ),
+    this.format = segmented<FormatId>(
+      RENDER_FORMATS.map((f) => ({ value: f.value, label: f.value, title: f.title })),
+      formatOf(views.render.width, views.render.height),
+      (id) => {
+        const f = RENDER_FORMATS.find((x) => x.value === id);
+        if (f) views.setRender(f.width, f.height);
+      },
     );
-    this.preset.addEventListener('change', () => {
-      const p = RENDER_PRESETS[Number(this.preset.value)];
-      if (p) views.setRender(p.width, p.height);
-    });
     const applySize = (): void => {
-      const w = Number(this.width.value);
-      const hh = Number(this.height.value);
-      if (w >= 16 && hh >= 16 && w <= MAX_RENDER_PX && hh <= MAX_RENDER_PX) views.setRender(w, hh);
+      const w = Number(this.width.value.trim());
+      const hh = Number(this.height.value.trim());
+      const valid = (n: number): boolean => Number.isInteger(n) && n >= 16 && n <= MAX_RENDER_PX;
+      this.width.classList.toggle('is-invalid', !valid(w));
+      this.height.classList.toggle('is-invalid', !valid(hh));
+      if (valid(w) && valid(hh)) views.setRender(w, hh);
     };
-    this.width.addEventListener('change', applySize);
-    this.height.addEventListener('change', applySize);
+    for (const input of [this.width, this.height]) {
+      input.addEventListener('change', applySize);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') input.blur();
+      });
+    }
     this.frameToggle = toggle('Marco de encuadre', views.showFrame, (v) => {
       views.showFrame = v;
       this.syncFrame();
@@ -57,33 +66,46 @@ export class ViewsPanel {
     const add = button({
       label: 'Nueva vista',
       icon: 'plus',
-      variant: 'primary',
+      variant: 'secondary',
+      size: 'sm',
       title: 'Guardar cámara, sol, luces y capas (N)',
       onClick: () => this.guard(() => views.create()),
     });
-    add.classList.add('btn-block');
 
     this.element.append(
       h(
         'div',
-        { class: 'render-settings' },
-        h('span', { class: 'field-label', textContent: 'Formato de render' }),
-        this.preset,
+        { class: 'panel-group' },
         h(
           'div',
-          { class: 'size-row' },
-          this.width,
-          h('span', { class: 'muted', textContent: '×' }),
-          this.height,
-          h('span', { class: 'muted', textContent: 'px' }),
+          { class: 'field' },
+          h('span', { class: 'field-label', textContent: 'Formato' }),
+          this.format.element,
+        ),
+        h(
+          'div',
+          { class: 'field' },
+          h('span', { class: 'field-label', textContent: 'Tamaño' }),
+          h(
+            'div',
+            { class: 'size-row' },
+            this.width,
+            h('span', { class: 'muted', textContent: '×' }),
+            this.height,
+            h('span', { class: 'unit', textContent: 'px' }),
+          ),
         ),
         this.frameToggle.element,
       ),
-      add,
+      h('div', { class: 'list-header' }, h('span', { textContent: 'Vistas guardadas' }), add),
       this.list,
     );
     views.on(() => this.render());
     this.render();
+  }
+
+  get count(): number {
+    return this.views.views.length;
   }
 
   private guard(action: () => unknown): void {
@@ -101,10 +123,11 @@ export class ViewsPanel {
   private render(): void {
     const { views } = this;
     const { width, height } = views.render;
-    this.width.value = String(width);
-    this.height.value = String(height);
-    const match = RENDER_PRESETS.findIndex((p) => p.width === width && p.height === height);
-    this.preset.value = match >= 0 ? String(match) : '';
+    if (document.activeElement !== this.width) this.width.value = String(width);
+    if (document.activeElement !== this.height) this.height.value = String(height);
+    this.width.classList.remove('is-invalid');
+    this.height.classList.remove('is-invalid');
+    this.format.set(formatOf(width, height));
     this.frameToggle.set(views.showFrame);
     this.syncFrame();
     this.list.replaceChildren(...views.views.map((view, i) => this.card(view, i)));
@@ -112,10 +135,9 @@ export class ViewsPanel {
       this.list.append(
         h(
           'li',
-          { class: 'empty-state' },
-          icon('views', 22),
-          h('strong', { textContent: 'Sin vistas guardadas' }),
-          h('span', { textContent: 'Encuadra la escena, ajusta el sol y pulsa "Nueva vista".' }),
+          { class: 'empty' },
+          h('span', { textContent: 'Sin vistas. Encuadra y pulsa ' }),
+          h('kbd', { textContent: 'N' }),
         ),
       );
     }
@@ -123,24 +145,37 @@ export class ViewsPanel {
 
   private card(view: SceneView, index: number): HTMLLIElement {
     const { views } = this;
-    const thumb = h('button', { type: 'button', class: 'view-thumb', title: 'Restaurar vista' });
+    const thumb = h('button', {
+      type: 'button',
+      class: 'view-thumb',
+      title: index < 9 ? `Restaurar vista (${index + 1})` : 'Restaurar vista',
+      attrs: { style: `aspect-ratio:${view.render.width}/${view.render.height}` },
+    });
     if (view.thumbnailDataUrl?.startsWith('data:image/')) {
       thumb.append(h('img', { src: view.thumbnailDataUrl, alt: '' }));
     } else {
-      thumb.append(icon('image', 20));
+      thumb.append(icon('image', 14));
     }
-    thumb.append(h('span', { class: 'view-index', textContent: String(index + 1) }));
     thumb.addEventListener('click', () => views.restore(view.id));
 
-    const name = h('input', { class: 'view-name', value: view.name, title: 'Renombrar' });
+    const name = h('input', {
+      class: 'view-name',
+      value: view.name,
+      title: 'Renombrar',
+      spellcheck: false,
+    });
     name.addEventListener('change', () => views.rename(view.id, name.value));
     name.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') name.blur();
+      if (e.key === 'Escape') {
+        name.value = view.name;
+        name.blur();
+      }
     });
     const time = view.sun.mode === 'datetime' ? view.sun.isoDate.slice(11, 16) : 'manual';
     const meta = h('span', {
-      class: 'view-meta',
-      textContent: `${view.render.width}×${view.render.height} · ${view.camera.type === 'perspective' ? 'Persp.' : 'Orto.'} · ☀ ${time}`,
+      class: 'view-meta mono',
+      textContent: `${view.render.width}×${view.render.height} · ${view.camera.type === 'perspective' ? 'P' : 'O'} · ${time}`,
     });
 
     const remove = button({
@@ -198,8 +233,10 @@ export class ViewsPanel {
     return h(
       'li',
       { class: `view-card${view.id === views.activeId ? ' is-active' : ''}` },
+      h('span', { class: 'view-index mono', textContent: String(index + 1).padStart(2, '0') }),
       thumb,
-      h('div', { class: 'view-body' }, name, meta, actions),
+      h('div', { class: 'view-body' }, name, meta),
+      actions,
     );
   }
 }

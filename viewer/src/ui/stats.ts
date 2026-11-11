@@ -1,27 +1,28 @@
 import type { WebGLRenderer } from 'three';
-import { formatNumber, h } from './dom';
+import { compactNumber, h } from './dom';
 
 const SAMPLE_WINDOW_MS = 1000;
 
-/** Píldora discreta con FPS (media por segundo), triángulos y draw calls del último fotograma. */
+/** Barra de estado mono (esquina inferior izquierda): FPS medio por segundo, triángulos y draws. */
 export class StatsOverlay {
   readonly element: HTMLElement;
-  private readonly fpsEl = h('span', { class: 'stat-fps' });
-  private readonly triEl = h('span');
-  private readonly callsEl = h('span');
+  private readonly fpsEl = h('b');
+  private readonly triEl = h('b');
+  private readonly callsEl = h('b');
   private frames = 0;
   private windowStart = performance.now();
 
   constructor(private readonly renderer: WebGLRenderer) {
+    const item = (label: string, value: HTMLElement): HTMLElement =>
+      h('span', { class: 'status-item' }, `${label} `, value);
     this.element = h(
       'div',
-      { class: 'stats-pill', data: { testid: 'stats' } },
-      this.fpsEl,
-      h('span', { class: 'sep' }),
-      this.triEl,
-      h('span', { class: 'sep' }),
-      this.callsEl,
+      { class: 'statusbar mono', data: { testid: 'stats' } },
+      item('FPS', this.fpsEl),
+      item('TRIS', this.triEl),
+      item('DRAWS', this.callsEl),
     );
+    this.fpsEl.textContent = this.triEl.textContent = this.callsEl.textContent = '—';
   }
 
   /** Llamar una vez por fotograma, después de renderizar. */
@@ -36,9 +37,9 @@ export class StatsOverlay {
     this.element.dataset['fps'] = fps.toFixed(1);
     this.element.dataset['triangles'] = String(triangles);
     this.element.dataset['calls'] = String(calls);
-    this.fpsEl.textContent = `${fps.toFixed(0)} FPS`;
+    this.fpsEl.textContent = fps.toFixed(0);
     this.fpsEl.classList.toggle('is-low', fps < 30);
-    this.triEl.textContent = `${formatNumber(triangles)} tri`;
-    this.callsEl.textContent = `${calls} draw calls`;
+    this.triEl.textContent = compactNumber(triangles);
+    this.callsEl.textContent = String(calls);
   }
 }

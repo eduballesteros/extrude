@@ -4,16 +4,16 @@ import { northScreenAngle, projectCube } from '../scene/viewCube';
 import { button, h } from './dom';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const SIZE = 96;
-const CUBE = 34; // lado proyectado del cubo (px)
-const RING = 42; // radio del anillo con la aguja del norte
+const SIZE = 120;
+const CUBE = 40; // lado proyectado del cubo (px)
+const RING = 48; // radio del anillo con la aguja del norte
 
 const FACE_TITLES: Record<string, string> = {
-  top: 'Planta',
-  north: 'Alzado norte',
-  south: 'Alzado sur',
-  east: 'Alzado este',
-  west: 'Alzado oeste',
+  top: 'Planta (TOP)',
+  north: 'Alzado norte (BACK)',
+  south: 'Alzado sur (FRONT)',
+  east: 'Alzado este (RIGHT)',
+  west: 'Alzado oeste (LEFT)',
 };
 
 function svgEl<K extends keyof SVGElementTagNameMap>(
@@ -46,10 +46,10 @@ export class ViewCubeWidget {
     );
     this.needle.append(
       svgEl('path', {
-        d: `M0 ${-RING - 7} L5 ${-RING + 3} L-5 ${-RING + 3} Z`,
+        d: `M0 ${-RING - 5} L3.5 ${-RING + 2} L-3.5 ${-RING + 2} Z`,
         class: 'needle-head',
       }),
-      svgEl('text', { y: String(-RING + 13), class: 'needle-label' }),
+      svgEl('text', { y: String(-RING - 8), class: 'needle-label' }),
     );
     (this.needle.lastChild as SVGTextElement).textContent = 'N';
     const iso = button({
@@ -90,7 +90,7 @@ export class ViewCubeWidget {
           }),
         );
         const text = svgEl('text', { x: face.center[0].toFixed(1), y: face.center[1].toFixed(1) });
-        text.textContent = face.id === 'top' ? 'PLANTA' : face.label;
+        text.textContent = face.label;
         g.append(text);
         const go = (): void => this.app.viewFrom(face.id);
         g.addEventListener('click', go);
