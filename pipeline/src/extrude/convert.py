@@ -17,6 +17,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from extrude.build import BuildResult, LineObject, SceneObject, build_scene
+from extrude.catalog import (
+    CATALOG_NAME,
+    build_catalog,
+    export_refs,
+    geometry_revision,
+    write_catalog,
+)
 from extrude.config import Config
 from extrude.converters import ensure_dxf
 from extrude.dxf_reader import read_dxf
@@ -63,6 +70,8 @@ class ConvertResult:
     outputs: list[OutputFile]
     timings: dict[str, float] = field(default_factory=dict)
     report: dict[str, Any] = field(default_factory=dict)
+    geometry_revision: str | None = None
+    catalog: dict[str, Any] = field(default_factory=dict)
 
 
 class _Timer:
@@ -106,12 +115,14 @@ def convert(source: Path, options: ConvertOptions) -> ConvertResult:
             f"No se pudo geolocalizar el centro con {config.crs}: "
             "revisa el CRS y las coordenadas. Se exporta el modelo sin ubicación solar."
         )
+    revision = geometry_revision(build, config.crs)
     info = SceneInfo(
         origin=origin,
         source_units=read.units.value,
         crs=config.crs,
         center_lat=geographic[0] if geographic else None,
         center_lon=geographic[1] if geographic else None,
+        geometry_revision=revision,
     )
 
     with timer.phase("export"):
@@ -119,6 +130,17 @@ def convert(source: Path, options: ConvertOptions) -> ConvertResult:
             outputs = _write_tiles(layers, info, options.out_dir, options.tile_size)
         else:
             outputs = [_write(layers, info, options.out_dir / MODEL_NAME)]
+        # Las referencias a nodos solo valen para un GLB único; con teselas el ID es la única clave.
+        tiled = any(o.tile for o in outputs)
+        catalog = build_catalog(
+            build,
+            revision=revision,
+            source_units=read.units.value,
+            crs=config.crs,
+            origin=origin,
+            export_refs=None if tiled else export_refs(layers),
+        )
+        write_catalog(catalog, options.out_dir / CATALOG_NAME)
     if options.compression is not None:
         with timer.phase("compress"):
             for output in outputs:
@@ -127,6 +149,8 @@ def convert(source: Path, options: ConvertOptions) -> ConvertResult:
         _write_manifest(outputs, info, options.out_dir, options.tile_size)
 
     result = ConvertResult(read, build, layers, origin, outputs, timer.timings)
+    result.geometry_revision = revision
+    result.catalog = catalog
     result.report = write_reports(result, source, options)
     return result
 
@@ -243,17 +267,19 @@ def _write_tiles(
         for line in layer.lines:
             bucket(key(line.points[0, 0], line.points[0, 1]), layer).lines.append(line)
         for group in layer.groups:
-            per_tile: dict[TileKey, list[NDArray[np.float64]]] = defaultdict(list)
-            for matrix in group.matrices:
-                per_tile[key(matrix[0, 3], matrix[1, 3])].append(matrix)
-            for tile, matrices in per_tile.items():
+            per_tile: dict[TileKey, list[int]] = defaultdict(list)
+            for k, matrix in enumerate(group.matrices):
+                per_tile[key(matrix[0, 3], matrix[1, 3])].append(k)
+            for tile, picked in per_tile.items():
                 bucket(tile, layer).groups.append(
                     InstanceGroup(
                         group.block,
                         group.prototype,
                         group.hard_edges,
-                        matrices,
+                        [group.matrices[k] for k in picked],
                         group.objects_per_instance,
+                        [group.object_ids[k] for k in picked] if group.object_ids else [],
+                        group.face_parts,
                     )
                 )
 
@@ -283,6 +309,7 @@ def _tile_bbox(path: Path) -> dict[str, list[float]] | None:
 def _write_manifest(outputs: list[OutputFile], info: SceneInfo, out_dir: Path, size: float) -> None:
     manifest = {
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
+        "geometry_revision": info.geometry_revision,
         "origin_offset": list(info.origin),
         "units": "m",
         "crs": info.crs,

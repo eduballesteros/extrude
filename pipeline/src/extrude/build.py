@@ -13,8 +13,9 @@ import numpy as np
 from numpy.typing import NDArray
 from shapely.geometry import Polygon
 
+from extrude.catalog import assign_ids
 from extrude.config import EXTRUDED_KINDS, Config, HeightSource, Kind, LayerRule
-from extrude.extrusion import MeshData, drop_degenerate, extrude
+from extrude.extrusion import MeshData, as_ground, drop_degenerate, extrude
 from extrude.heights import HeightOrigin, Neighbors, TextIndex, resolve_height
 from extrude.meshes3d import base_plane, mesh_from_feature, tin
 from extrude.model import (
@@ -53,6 +54,9 @@ class SceneObject:
     floor_elevation: float | None = None  # planta horizontal; excluye el zócalo
     foundation_height: float = 0.0
     source_insert: InsertRef | None = None  # procedencia aun si el apoyo impide instanciar
+    sources: tuple[Provenance, ...] = ()  # entidades de origen (identidad persistente)
+    object_id: str | None = None  # catalog.assign_ids; independiente de capa exportada/tesela
+    label: str | None = None  # etiqueta de usuario (E-001…), no es identidad
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +152,7 @@ def build_scene(read: ReadResult, config: Config) -> BuildResult:
         else:
             result.without_geometry[layer] = counts
 
+    assign_ids(result)
     if terrain is not None:
         _check_ground(result, terrain)
     floating = sorted(n for n, g in result.layers.items() if g.rule.base_from_terrain)
@@ -187,6 +192,7 @@ def _build_layer(
             _handles([mesh_feature]),
             instance=mesh_feature.source.insert,
             hard_edges=True,
+            sources=(mesh_feature.source,),
         )
         _add(geometry, obj)
 
@@ -264,6 +270,8 @@ def _extrude_layer(
                 base += low
                 instance = _at_elevation(instance, base / scale)
             raw = extrude(footprint.polygon, base, resolved.height, bottom=rule.bottom_cap)
+        if rule.kind is not Kind.BUILDING:
+            raw = as_ground(raw)
         mesh, degenerate = drop_degenerate(raw)
         stats.degenerate_triangles += degenerate
         source_type = "+".join(sorted({s.dxftype for s in footprint.sources}))
@@ -283,6 +291,7 @@ def _extrude_layer(
                 floor_elevation=floor,
                 foundation_height=high - low if foundation else 0.0,
                 source_insert=source_insert,
+                sources=footprint.sources,
             ),
         )
 
@@ -300,7 +309,8 @@ def _terrain_layer(
         mesh = base_plane(read.bbox, scale, geometry.rule.base_elevation)
         geometry.stats.heights["base_plane"] += 1
     if mesh is not None:
-        _add(geometry, SceneObject(mesh, "TIN", _handles(features)))
+        sources = tuple(f.source for f in features)
+        _add(geometry, SceneObject(mesh, "TIN", _handles(features), sources=sources))
 
 
 def _terrain_samples(features: Sequence[Feature]) -> list[NDArray[np.float64]]:
@@ -431,6 +441,8 @@ def _check_ground(result: BuildResult, terrain: TerrainSurface) -> None:
                 geometry.stats.ground_details.append(
                     {
                         "category": category,
+                        "object_id": obj.object_id,
+                        "label": obj.label,
                         "handles": list(obj.handles),
                         "insert_handle": (
                             provenance.handle.partition("#")[0] if provenance else None

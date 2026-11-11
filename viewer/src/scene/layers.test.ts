@@ -19,6 +19,8 @@ function pipelineLikeScene(): { root: Group; buildings: Mesh; trees: InstancedMe
   const geometry = new BoxGeometry(10, 10, 10);
   const ids = new Float32Array(geometry.attributes['position']!.count).fill(1);
   geometry.setAttribute('_object_id', new Float32BufferAttribute(ids, 1));
+  const surfaces = new Float32Array(geometry.attributes['position']!.count).fill(3);
+  geometry.setAttribute('_surface', new Float32BufferAttribute(surfaces, 1));
   const buildings = new Mesh(geometry, new MeshStandardMaterial({ color: '#d9d4c7' }));
   buildings.userData = {
     layer: 'EDIFICIOS',
@@ -30,7 +32,11 @@ function pipelineLikeScene(): { root: Group; buildings: Mesh; trees: InstancedMe
   const vegetation = new Group();
   vegetation.userData = { layer: 'VEGETACION', kind: 'vegetation', visible: false };
   const trees = new InstancedMesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial(), 2);
-  trees.userData = { block: 'ARBOL', instances: 2 };
+  trees.userData = {
+    block: 'ARBOL',
+    instances: 2,
+    object_ids: [['obj-000000000000000a'], ['obj-000000000000000b']],
+  };
   vegetation.add(trees);
   root.add(buildings, vegetation);
   root.updateMatrixWorld(true);
@@ -124,5 +130,15 @@ describe('selección', () => {
     const fields = Object.fromEntries(describeHit(hit!).fields);
     expect(fields['Bloque']).toBe('ARBOL');
     expect(fields['Instancia']).toMatch(/de 2$/);
+    expect(fields['Superficie']).toBeUndefined();
+    const index = hit!.instanceId!;
+    expect(fields['ID']).toBe(index === 0 ? 'obj-000000000000000a' : 'obj-000000000000000b');
+  });
+
+  it('muestra la superficie semántica del punto pulsado', () => {
+    const { root, trees } = pipelineLikeScene();
+    trees.parent!.visible = false;
+    const hit = firstVisibleHit(ray(root, 0, 0));
+    expect(Object.fromEntries(describeHit(hit!).fields)['Superficie']).toBe('Cubierta');
   });
 });

@@ -104,6 +104,8 @@ def build_report(result: ConvertResult, source: Path, options: ConvertOptions) -
         "units_assumed": read.units_assumed,
         "origin_offset": list(result.origin),
         "crs": options.config.crs,
+        "geometry_revision": result.geometry_revision,
+        "catalog": {"file": "objects.json", "objects": len(result.catalog.get("objects", []))},
         "entities": {
             "read_by_type": dict(by_type.most_common()),
             "unsupported": _rows(read.unsupported),
@@ -199,6 +201,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- DXF: {report['dxf_version']} · unidades: {report['units']}"
         + (" (supuestas)" if report["units_assumed"] else ""),
         f"- Desplazamiento de origen (m, ejes DWG): {report['origin_offset']}",
+        f"- Revisión geométrica: `{report['geometry_revision']}` · "
+        f"{report['catalog']['objects']:,} objetos en {report['catalog']['file']}",
         f"- Triángulos: {out['triangles']:,} · draw calls: {out['draw_calls']} · "
         f"tamaño: {_mb(out['total_size_bytes'])}"
         + (f" · compresión: {out['compression']}" if out["compression"] else ""),

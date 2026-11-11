@@ -8,7 +8,10 @@ nivel. Un bloque se instancia solo si:
     densidad (INSERT escalados), misma caja envolvente y misma área de superficie (±1 %). Así,
     bloques cuya geometría depende del INSERT (alturas por atributo, contornos que se fusionan
     con otros) no se instancian;
-  - la matriz no refleja (determinante > 0) y se descompone en TRS sin cizalla.
+  - la matriz no refleja (determinante > 0) y se descompone en TRS sin cizalla;
+  - escala igual en X e Y (en planta). El prototipo guarda UV en metros *locales* del bloque;
+    al materializar se multiplican por la escala de cada copia para que un INSERT al doble de
+    tamaño no duplique el tamaño del ladrillo (RG-06).
 El resto de objetos sigue el camino normal (fusión por capa).
 """
 
@@ -16,7 +19,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,6 +39,10 @@ class InstanceGroup:
     hard_edges: bool
     matrices: list[Matrix]  # bloque (metros) → WCS (metros)
     objects_per_instance: int
+    # IDs persistentes (catalog) de los objetos de cada instancia, paralelo a `matrices`
+    object_ids: list[tuple[str | None, ...]] = field(default_factory=list)
+    # Parte (objeto dentro de la copia) de cada cara del prototipo
+    face_parts: NDArray[np.int32] = field(default_factory=lambda: np.zeros(0, dtype=np.int32))
 
 
 def block_matrix(raw: tuple[float, ...], scale: float) -> Matrix:
@@ -120,6 +127,8 @@ def _try_group(
 ) -> tuple[InstanceGroup | None, list[list[SceneObject]]]:
     """Agrupa las copias compatibles con la primera válida; devuelve también las rechazadas."""
     matrices: list[Matrix] = []
+    face_parts = np.zeros(0, dtype=np.int32)
+    object_ids: list[tuple[str | None, ...]] = []
     rejected: list[list[SceneObject]] = []
     prototype: MeshData | None = None
     reference: NDArray[np.float64] | None = None
@@ -133,11 +142,21 @@ def _try_group(
         if matrix is None or decompose_trs(matrix) is None or len(hard) != 1:
             rejected.append(members)  # reflejada, con cizalla o mezcla de tipos
             continue
+        own_scale = np.linalg.norm(matrix[:3, :3], axis=0)
+        if not np.isclose(own_scale[0], own_scale[1], rtol=1e-6, atol=0):
+            rejected.append(members)  # escala no uniforme en planta: UV de pared ambiguas
+            continue
         mesh = concat([o.mesh for o in members])
         local = transform(mesh.vertices, np.linalg.inv(matrix))
         signature = _signature(local, tolerance)
         if reference is None:
-            prototype, reference = MeshData(local, mesh.faces), signature
+            prototype = MeshData(
+                local, mesh.faces, mesh.surfaces, _local_uvs(mesh, local, own_scale)
+            )
+            face_parts = np.repeat(
+                np.arange(len(members), dtype=np.int32), [o.mesh.triangle_count for o in members]
+            )
+            reference = signature
             shape = (len(members), hard.pop())
         elif (len(members), hard.pop()) != shape or not (
             _same(signature, reference, tolerance)
@@ -146,9 +165,25 @@ def _try_group(
             rejected.append(members)
             continue
         matrices.append(matrix)
+        object_ids.append(tuple(o.object_id for o in members))
     if prototype is None or shape is None:
         return None, instances
-    return InstanceGroup(block, prototype, shape[1], matrices, shape[0]), rejected
+    group = InstanceGroup(block, prototype, shape[1], matrices, shape[0], object_ids, face_parts)
+    return group, rejected
+
+
+def _local_uvs(
+    mesh: MeshData, local: NDArray[np.float64], scale: NDArray[np.float64]
+) -> NDArray[np.float64] | None:
+    """UV de pared en metros del bloque: distancia sobre el contorno / escala en planta y cota
+    local. Las filas NaN (tapas) se proyectan en planta al exportar, también en local."""
+    if mesh.uvs is None:
+        return None
+    uvs = mesh.uvs.copy()
+    walls = np.isfinite(uvs[:, 0])
+    uvs[walls, 0] /= scale[0]
+    uvs[walls, 1] = local[walls, 2]
+    return uvs
 
 
 def _extrusion_matrix(matrix: Matrix) -> Matrix:

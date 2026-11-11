@@ -16,6 +16,7 @@ from extrude.convert import ConvertOptions, convert
 from extrude.dxf_reader import read_dxf
 from extrude.extrusion import MeshData
 from extrude.gltf_export import _object_table
+from extrude.surfaces import Surface
 from extrude.terrain import TerrainSurface
 
 
@@ -36,8 +37,27 @@ def test_foundation_is_closed_with_flat_roof_and_terrain_bottom(patio: bool, rid
     assert merged.is_winding_consistent
     assert merged.volume > 0
     # Cada punto de la superficie inferior se apoya en el TIN, también en cruces de aristas.
-    lower = mesh.vertices[mesh.vertices[:, 2] < high + 8.99]
+    # Los vértices en la cota de planta son la arista que separa zócalo y fachada.
+    z = mesh.vertices[:, 2]
+    lower = mesh.vertices[(z < high + 8.99) & ~np.isclose(z, high)]
+    assert len(lower)
     assert np.allclose(lower[:, 2], terrain.height(lower[:, :2]), atol=1e-8)
+    # Zócalo y fachada se separan en la planta: el zócalo no sube de ella ni la fachada baja.
+    surfaces = mesh.face_surfaces
+    foundation = mesh.vertices[mesh.faces[surfaces == Surface.FOUNDATION]]
+    facade = mesh.vertices[mesh.faces[surfaces == Surface.FACADE_EXTERIOR]]
+    assert len(foundation) and len(facade)
+    assert foundation[..., 2].max() == pytest.approx(high)
+    assert facade[..., 2].min() == pytest.approx(high)
+    assert (surfaces == Surface.FACADE_COURTYARD).any() == patio
+    assert (surfaces == Surface.UNDERSIDE).any()
+    assert set(np.unique(surfaces)) <= {
+        Surface.ROOF,
+        Surface.FOUNDATION,
+        Surface.FACADE_EXTERIOR,
+        Surface.FACADE_COURTYARD,
+        Surface.UNDERSIDE,
+    }
     assert mesh.vertices[:, 2].max() == pytest.approx(high + 9)
     # Centros de caras inferiores: también siguen las crestas interiores, no solo las esquinas.
     triangles = mesh.vertices[mesh.faces]

@@ -9,7 +9,8 @@ Solo librería estándar. Pensado para uso local (escucha en 127.0.0.1 por defec
                                          sigue en segundo plano
   GET  /api/jobs/<id>/status           → {state, phase, fraction, result | error, fix}
   GET  /api/jobs/<id>/<archivo>        → model.glb, report.md, report.json, config.yaml,
-                                         manifest.json y tiles/tile_<i>_<j>.glb (con tiles=)
+                                         objects.json (catálogo de objetos), manifest.json y
+                                         tiles/tile_<i>_<j>.glb (con tiles=)
 
 Seguridad: el archivo subido se guarda con nombre fijo (solo se usa su extensión), con límite
 de tamaño; los ids de trabajo y los nombres de archivo se validan con una lista blanca (sin
@@ -66,6 +67,7 @@ JOB_FILES = {
     "report.json": "application/json",
     "config.yaml": "application/yaml; charset=utf-8",
     "manifest.json": "application/json",
+    "objects.json": "application/json",
 }
 # Los INSERT pueden quedar fuera del bbox geométrico: los índices de convert._write_tiles
 # son enteros con signo, sin límite de seis dígitos. Solo se admiten dígitos ASCII.
@@ -483,6 +485,7 @@ def _convert_job(
             "manifest": f"{base}/manifest.json" if tiles else None,
             "report_md": f"{base}/report.md",
             "report_json": f"{base}/report.json",
+            "objects": f"{base}/objects.json",
             "config": f"{base}/config.yaml",
         },
         "report": result.report,

@@ -27,6 +27,8 @@ function format(value: unknown): string {
 }
 
 const FIELD_LABELS: Record<string, string> = {
+  id: 'ID',
+  label: 'Etiqueta',
   height: 'Altura (m)',
   floors: 'Plantas',
   base: 'Cota base (m)',
@@ -35,6 +37,24 @@ const FIELD_LABELS: Record<string, string> = {
   source_type: 'Tipo DXF',
   handle: 'Handle',
 };
+
+/** Superficies semánticas del pipeline (atributo `_SURFACE`, ver surfaces.py). */
+export const SURFACE_LABELS: readonly string[] = [
+  'Genérica',
+  'Fachada exterior',
+  'Fachada de patio',
+  'Cubierta',
+  'Zócalo',
+  'Suelo',
+  'Cara inferior',
+];
+
+function surfaceOf(hit: Intersection): string | null {
+  const attribute = (hit.object as { geometry?: { attributes: Record<string, BufferAttribute> } })
+    .geometry?.attributes['_surface'];
+  if (!attribute || !hit.face) return null;
+  return SURFACE_LABELS[Math.round(attribute.getX(hit.face.a))] ?? null;
+}
 
 export function describeHit(hit: Intersection): PickInfo {
   const layerNode = findAncestor(hit.object, 'layer');
@@ -48,6 +68,9 @@ export function describeHit(hit: Intersection): PickInfo {
       'Instancia',
       `${hit.instanceId + 1} de ${format(blockNode.userData['instances'])}`,
     ]);
+    const objectIds = blockNode.userData['object_ids'] as unknown;
+    const ids = Array.isArray(objectIds) ? (objectIds[hit.instanceId] as unknown) : undefined;
+    if (Array.isArray(ids) && ids.length) fields.push(['ID', ids.map(format).join(', ')]);
   } else if (hit.face) {
     const ids = (hit.object as { geometry?: { attributes: Record<string, BufferAttribute> } })
       .geometry?.attributes['_object_id'];
@@ -60,6 +83,8 @@ export function describeHit(hit: Intersection): PickInfo {
       }
     }
   }
+  const surface = surfaceOf(hit);
+  if (surface) fields.push(['Superficie', surface]);
   if (extras['source_entities']) {
     const entities = extras['source_entities'] as Record<string, number>;
     fields.push([

@@ -64,6 +64,23 @@ cotas válidas dependen de la configuración de cada proyecto.
   (handle, bloque, matriz). Una copia se instancia solo si, llevada a coordenadas del bloque, su
   geometría coincide con el prototipo; si no, se fusiona. Así nunca se instancia algo que depende
   del INSERT (alturas por atributo, contornos fusionados).
+- **Identidad y superficies** (`catalog.py`, `surfaces.py`): cada triángulo lleva su superficie
+  semántica desde que se crea (cubierta, fachada exterior/patio, zócalo, suelo…), sin deducirla
+  luego por la normal. El zócalo se separa de la fachada en la cota de planta con dos quads
+  coplanares, sin cambiar la envolvente. Al terminar `build_scene`, cada objeto recibe un ID
+  persistente derivado de su procedencia DXF y una etiqueta (E-001…); `convert` escribe
+  `objects.json` con la revisión geométrica (hash de la geometría construida).
+- **Plan de materialidad** (`materiality.py`, `material_library.py`): `materials.json` es un
+  documento versionado e independiente del prompt, validado con pydantic estricto y contra el
+  catálogo y la biblioteca. Los 12 presets aún no tienen texturas (licencias pendientes).
+- **Materialización** (`materialize.py`, `textures.py`): el GLB base ya lleva superficie y UV en
+  metros por vértice, así que aplicar un plan es reescribir el GLB (≈1 s con miles de edificios)
+  sin volver a leer el DWG (RN-01). Las UV en metros se generan donde se construyen las paredes
+  (distancia sobre el contorno, continua en las esquinas); la escala física y el giro se escriben
+  en las UV al materializar, no con `KHR_texture_transform`, para que cualquier motor vea lo
+  mismo. Los prototipos instanciados guardan UV en metros locales y las copias se reagrupan por
+  material y escala. Texturas procedurales propias (sin licencias de terceros) y en escala de
+  grises: el color es el factor del material.
 - **Herramientas Node** (`tools/`): validador de Khronos y `gltf-transform` se ejecutan con `node`
   directamente (nunca con `npx.cmd` ni shell), con rutas generadas por Extrude.
 - **Visor**: el estado (`viewer/src/state.ts`) es un objeto JSON plano. Los módulos de escena lo

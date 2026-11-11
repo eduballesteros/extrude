@@ -34,6 +34,7 @@ glTF 2.0 binario, generado sin librerías externas (`pipeline/src/extrude/gltf_e
 | `axis_transform` | `"(x, y, z)_dwg -> (x, z, -y)_gltf"` |
 | `bbox` | `{min, max}` en coordenadas glTF (ya recentradas) |
 | `generator` | versión de Extrude |
+| `geometry_revision` | `sha256:…` de la geometría construida; la misma que en `objects.json` (ver abajo) |
 
 ### Nodos
 
@@ -48,14 +49,24 @@ glTF 2.0 binario, generado sin librerías externas (`pipeline/src/extrude/gltf_e
   | `source_entities` | `{tipo DXF: nº}` leídos en la capa |
   | `triangle_count` | triángulos de la capa, instancias incluidas |
   | `ground_check` | Si hay TIN: `checked`, `floating` (base sobre todo el terreno), `buried` (cubierta bajo todo el terreno), `intersecting` (el terreno entra entre base y cubierta) y `partially_buried` (supera la cubierta solo en parte de la huella). Categorías excluyentes, con tolerancia de 1 m. Las intersecciones con ladera son informativas y no recomiendan reasentar automáticamente. También disponible por capa en `report.json`. |
-  | `objects` | arrays paralelos por objeto: `height`, `floors`, `base`, `foundation_height`, `height_origin`, `source_type`, `handle`. En edificios adaptados al terreno, `base` es la cota de planta horizontal y `foundation_height` el desnivel máximo del zócalo bajo ella; no se suma a `height` ni a `floors`. Los handles de bloques con zócalo corresponden al INSERT original. |
+  | `objects` | arrays paralelos por objeto: `id` (identidad persistente, ver `objects.json`), `label` (E-001…), `height`, `floors`, `base`, `foundation_height`, `height_origin`, `source_type`, `handle`. En edificios adaptados al terreno, `base` es la cota de planta horizontal y `foundation_height` el desnivel máximo del zócalo bajo ella; no se suma a `height` ni a `floors`. Los handles de bloques con zócalo corresponden al INSERT original. |
 
 - **Identificador de objeto:** el atributo de vértice `_OBJECT_ID` (float; redondéalo) es el
   índice en `extras.objects`. Permite seleccionar un edificio concreto dentro de la malla
-  fusionada. En Three.js llega como `geometry.attributes._object_id`.
+  fusionada. En Three.js llega como `geometry.attributes._object_id`. Es un índice local del
+  GLB: para guardar referencias usa `extras.objects.id[índice]`. En prototipos instanciados es
+  la parte dentro de cada copia (`extras.object_ids[instancia][parte]`).
+- **`_SURFACE`** (float): superficie semántica del vértice (0 genérica, 1 fachada exterior,
+  2 fachada de patio, 3 cubierta, 4 zócalo, 5 suelo, 6 cara inferior). Ningún vértice se comparte
+  entre superficies.
+- **`TEXCOORD_0`** en **metros** en el GLB base: paredes = distancia sobre el contorno (continua
+  en las esquinas) y cota absoluta; cubiertas y suelos = planta (x, y del dibujo, recentrados);
+  mallas 3D de origen = por triángulo, en planta o vertical según su normal. En prototipos, metros
+  locales del bloque. El GLB materializado las sustituye por UV de textura (ver abajo).
 - **Instancing:** los bloques con al menos `instancing_min` copias idénticas (por defecto 10)
   van en nodos hijos `capa/BLOQUE` con `EXT_mesh_gpu_instancing` (TRANSLATION, ROTATION,
-  SCALE). Su `extras` lleva `block`, `instances` y `objects_per_instance`. Se excluyen de la
+  SCALE). Su `extras` lleva `block`, `instances`, `objects_per_instance` y `object_ids` (por
+  instancia, los IDs persistentes de sus objetos, en el orden de los atributos). Se excluyen de la
   instanciación, y se fusionan con el resto de la capa:
   - las copias reflejadas (determinante negativo) o con cizalla;
   - los bloques cuya geometría varía entre copias (p. ej. altura por atributo).
@@ -75,6 +86,7 @@ teselas comparten el mismo `origin_offset`, así que se cargan juntas sin despla
 ```json
 {
   "schemaVersion": 1,
+  "geometry_revision": "sha256:…",
   "origin_offset": [x, y, z],
   "units": "m",
   "crs": null,
@@ -85,6 +97,110 @@ teselas comparten el mismo `origin_offset`, así que se cargan juntas sin despla
              "triangles": 0, "size_bytes": 0}]
 }
 ```
+
+### Catálogo de objetos (`out/objects.json`)
+
+Se escribe en cada conversión, también con teselas. Es la base de la materialidad
+(docs/REQUISITOS_MATERIALIDAD_IA.md §5 y §9):
+
+```json
+{
+  "schemaVersion": 1,
+  "geometryRevision": "sha256:…",
+  "units": "m", "sourceUnits": "mm", "crs": "EPSG:25830",
+  "originOffset": [x, y, z],
+  "north": {"axis": "+Y", "reference": "plan", "description": "…"},
+  "surfaces": ["generic", "facade_exterior", "facade_courtyard", "roof", "foundation",
+               "ground", "underside"],
+  "objects": [{
+    "id": "obj-1f3a…", "label": "E-001", "layer": "EDIFICIOS", "kind": "building",
+    "sourceType": "LWPOLYLINE",
+    "provenance": {"handles": ["2A"], "insert": null, "blockPaths": [], "attributes": {}},
+    "heightM": 9.0, "floorM": null, "foundationHeightM": 0.0,
+    "centerM": [x, y], "bboxM": {"min": [], "max": []}, "footprintAreaM2": 500.0,
+    "surfaces": {"roof": {"triangles": 8, "areaM2": 500.0},
+                 "facade_exterior": {"triangles": 8, "areaM2": 900.0}},
+    "export": {"node": "EDIFICIOS", "objectIndex": 0}
+  }]
+}
+```
+
+- **`id`**: hash de la capa y de la procedencia DXF (handle; en bloques, INSERT de primer nivel,
+  ruta de bloques y tipo). No depende del material, la tesela, la primitiva ni el orden. Los
+  objetos que comparten procedencia (HATCH con varias islas) se desempatan por posición con
+  `-2`, `-3`… Estable dentro de una revisión; tras editar el DWG hay que comprobarlo.
+- **`label`**: nombre amigable por tipo (E edificio, V vial, A agua, G vegetación, T terreno,
+  O otros), de norte a sur y de oeste a este. No es identidad.
+- **`geometryRevision`**: hash de vértices (al micrómetro), caras y superficies de todos los
+  objetos, líneas y CRS. Mismo archivo y configuración → misma revisión, también si el dibujo
+  está en mm o en m.
+- **Coordenadas** en metros y ejes del dibujo, **antes** del recentrado y del paso a Y-up: las
+  referencias espaciales («al norte») se resuelven aquí. Norte = +Y del plano.
+- **`surfaces`**: superficies presentes, etiquetadas al construir: fachada exterior, fachada de
+  patio, cubierta, zócalo automático (del terreno a la cota de planta), suelo, tapa inferior o
+  genérica (mallas 3D de origen). Fachadas, cubierta y zócalo solo existen en capas `building`;
+  viales, agua y vegetación son una única superficie `ground` aunque tengan espesor.
+- **`export`**: `{node, objectIndex}` en la malla fusionada o `{node, instance, part}` en un
+  bloque instanciado. `null` con teselas: ahí la clave es el `id` en los `extras`.
+
+### Plan de materialidad (`materials.json`)
+
+Esquema estricto en `pipeline/src/extrude/materiality.py` (§9 de los requisitos). Contiene solo
+asignaciones resueltas a IDs del catálogo, sus omisiones y, opcionalmente, la descripción
+original:
+
+```json
+{
+  "schemaVersion": 1, "projectId": "proyecto-a",
+  "geometryRevision": "sha256:…", "materialRevision": "mat-003", "catalogVersion": "library-1",
+  "assignments": [{
+    "objectIds": ["obj-…"], "surface": "facade_exterior",
+    "materialId": "brick_light", "materialVersion": "1",
+    "parameters": {"tileSizeM": [2.0, 2.0], "rotationDeg": 0, "roughness": 0.85,
+                   "color": "#d8c3a5"},
+    "origin": "manual | ai_reviewed", "reason": "…"
+  }],
+  "omissions": [{"text": "Carpinterías negras", "reason": "El DWG no tiene carpinterías"}]
+}
+```
+
+Se rechazan claves desconocidas, NaN/infinito, IDs con otro formato, superficies o materiales
+inexistentes y URLs. `extrude validate-materials materials.json --objects out/objects.json`
+comprueba además la revisión geométrica, que cada objeto tenga la superficie asignada, la versión
+del material en la biblioteca y que ningún objeto + superficie tenga dos asignaciones.
+
+### GLB materializado (`extrude materialize`)
+
+```sh
+uv run extrude materialize out/model.glb materials.json            # → out/model.materialized.glb
+uv run extrude materialize out/model.glb materials.json -o vista.glb --compress meshopt
+uv run extrude library                                            # IDs y versiones de material
+```
+
+Parte del `model.glb` **sin comprimir** de `convert`, sin volver a leer el DWG. El plan se valida
+contra el propio GLB (revisión geométrica, IDs, superficies) y la biblioteca; si algo no cuadra no
+se escribe nada. La salida se escribe a un temporal y se renombra al final.
+
+- **Primitivas**: una por capa y material. Las superficies sin asignación conservan el material
+  de su capa. `POSITION`, `NORMAL`, `_OBJECT_ID`, `_SURFACE`, los nodos y sus `extras` se copian
+  sin cambios: la geometría es la misma (solo se reparten vértices).
+- **Instancias**: las copias se reagrupan por asignación. Si cambias el material de una copia,
+  sale a otro nodo `capa/BLOQUE` con sus propias `TRANSLATION/ROTATION/SCALE` y su subconjunto
+  de `extras.object_ids`; las demás no cambian. Con textura, las copias de distinta escala también
+  se separan para que el ladrillo mida lo mismo en todas.
+- **UV de textura**: `TEXCOORD_0` = metros × escala de la copia, girados `rotationDeg` y divididos
+  por `tileSizeM`, con v invertida (convención glTF). La escala física va en las UV, no en
+  `KHR_texture_transform`: Three.js, Blender y cualquier visor muestran lo mismo.
+- **Materiales**: PBR metallic-roughness. Con textura, `baseColorTexture` es un PNG de
+  luminancia y `baseColorFactor` el color del preset (o `parameters.color`) compensado por la
+  luminancia media. `extras`: `material_id`, `material_version`, `color`, `material_revision`.
+  Vidrio (transparencia, sin refracción) y agua no llevan textura.
+- **Texturas**: procedurales de Extrude (512 px, sin licencias de terceros), incrustadas en el
+  binario (`images[].bufferView`): el GLB se abre sin conexión.
+- **`scene.extras`** añade `material_revision`, `material_project`, `material_catalog`,
+  `material_assignments` y `uv_convention`. Un GLB materializado no se vuelve a materializar:
+  cada plan se aplica sobre el `model.glb` base.
+- Válido en el validador de Khronos sin errores ni avisos (test automático).
 
 ### Compresión (`--compress draco|meshopt`)
 

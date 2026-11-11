@@ -149,9 +149,18 @@ uv run extrude convert plano.dwg -c proyecto.yaml -o ../out/proyecto
 uv run extrude convert plano.dxf -c proyecto.yaml -o ../out/ciudad --tiles 500 --compress meshopt
 ```
 
-Genera `model.glb` (o `tiles/*.glb` + `manifest.json`), `report.md` y `report.json`. El informe
-lista todo lo leído, convertido, ignorado, reparado o descartado, con su capa. Formato del GLB:
-[docs/EXPORT_FORMATS.md](docs/EXPORT_FORMATS.md).
+Genera `model.glb` (o `tiles/*.glb` + `manifest.json`), `report.md`, `report.json` y
+`objects.json`. El informe lista todo lo leído, convertido, ignorado, reparado o descartado, con
+su capa. `objects.json` es el catálogo de objetos: un ID persistente y una etiqueta (E-001…) por
+edificio, sus superficies (fachada, patio, cubierta, zócalo) y la revisión geométrica. Un plan de
+materiales se valida contra él con
+`uv run extrude validate-materials materials.json --objects ../out/proyecto/objects.json` y se
+aplica, sin volver a convertir, con
+`uv run extrude materialize ../out/proyecto/model.glb materials.json`: el resultado
+(`model.materialized.glb`) lleva materiales PBR y texturas incorporadas, y se abre en el visor o
+en Blender. `uv run extrude library` lista los materiales disponibles.
+Formatos: [docs/EXPORT_FORMATS.md](docs/EXPORT_FORMATS.md); requisitos de materialidad:
+[docs/REQUISITOS_MATERIALIDAD_IA.md](docs/REQUISITOS_MATERIALIDAD_IA.md).
 
 Con las muestras: `just convert-samples` y `just validate out/block_2d/model.glb`.
 
