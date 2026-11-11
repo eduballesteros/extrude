@@ -1,4 +1,5 @@
 import type { LoadStage } from '../scene/loader';
+import { ConversionDestination } from '../convert/destination';
 import { button, h, icon } from './dom';
 
 export interface SampleModel {
@@ -10,11 +11,13 @@ export interface SampleModel {
 
 export const SAMPLE_MODELS: SampleModel[] = [
   { title: 'Manzana 2D', tag: 'DXF', url: '/models/block_2d.glb' },
-  { title: 'Ciudad 50k', tag: 'UTM', url: '/models/city.glb' },
+  { title: 'Manzana UTM', tag: 'UTM', url: '/models/block_2d_utm.glb' },
   { title: 'Bloques anidados', tag: 'Instancias', url: '/models/nested.glb' },
 ];
 
 export const ACCEPTED = '.dwg,.dxf,.glb,.gltf,.yaml,.yml';
+/** Formatos que se muestran en la zona para soltar (el .yaml es la configuración opcional). */
+export const FORMAT_TAGS = ['.dwg', '.dxf', '.glb', '.gltf', '.yaml'];
 export const APP_VERSION = (import.meta.env['VITE_APP_VERSION'] as string | undefined) ?? 'dev';
 
 /** Atajos globales que se muestran en el pie (tecla, acción). */
@@ -23,21 +26,42 @@ export const SHORTCUTS: [string, string][] = [
   ['Espacio', 'Play sol'],
   ['1-9', 'Vistas'],
   ['N', 'Nueva vista'],
+  ['M', 'Medir'],
   ['Tab', 'Paneles'],
 ];
 
-const STAGE_LABEL: Record<LoadStage | 'convert', string> = {
+/** Carga local (LoadStage), o conversión en extrude serve: 'convert' o 'convert:<fase>'. */
+export type ProgressStage = LoadStage | 'convert' | `convert:${string}`;
+
+const STAGE_LABEL: Record<string, string> = {
   convert: 'Convirtiendo plano (extrude serve)',
+  'convert:upload': 'Enviando plano al servidor…',
+  'convert:queued': 'En cola: hay otra conversión en curso…',
+  'convert:draft_config': 'Generando configuración automática…',
+  'convert:dwg_to_dxf': 'Convirtiendo DWG a DXF…',
+  'convert:read': 'Leyendo entidades…',
+  'convert:build': 'Construyendo geometría 3D…',
+  'convert:instancing': 'Detectando bloques repetidos…',
+  'convert:export': 'Exportando GLB…',
+  'convert:compress': 'Comprimiendo GLB…',
+  'convert:done': 'Conversión terminada',
   download: 'Descargando',
   read: 'Leyendo archivo',
   parse: 'Cargando geometría',
   prepare: 'Aplicando sombras',
 };
 
+/** Texto de la barra de progreso; una fase nueva del servidor cae en el genérico. */
+export function stageLabel(stage: ProgressStage): string {
+  return STAGE_LABEL[stage] ?? STAGE_LABEL['convert']!;
+}
+
 export interface WelcomeHandlers {
   onFile: (file: File) => void;
   onSample: (sample: SampleModel) => void;
   onClose: () => void;
+  onCancel?: () => void;
+  onRetry?: () => void;
 }
 
 /**
@@ -54,9 +78,12 @@ export class WelcomeScreen {
   private readonly error: HTMLElement;
   private readonly closeButton: HTMLButtonElement;
   private readonly configLabel: HTMLElement;
+  private readonly cancelButton: HTMLButtonElement;
+  private readonly retryButton: HTMLButtonElement;
+  private readonly destinationConsent: HTMLInputElement | null;
   private busy = false;
 
-  constructor(handlers: WelcomeHandlers) {
+  constructor(handlers: WelcomeHandlers, destination = new ConversionDestination(null)) {
     const input = h('input', { type: 'file', accept: ACCEPTED, hidden: true });
     input.addEventListener('change', () => {
       const file = input.files?.[0];
@@ -72,18 +99,21 @@ export class WelcomeScreen {
         tabIndex: 0,
         attrs: { role: 'button', 'aria-label': 'Arrastra o elige un archivo' },
       },
-      h('div', { class: 'dropzone-icon' }, icon('file', 20)),
-      h('p', {
-        class: 'dropzone-title',
-        textContent: 'Arrastra un modelo .glb, .gltf o plano .dwg / .dxf',
-      }),
+      h('div', { class: 'dropzone-icon' }, icon('upload', 22)),
+      h('p', { class: 'dropzone-title', textContent: 'Suelta aquí tu plano o tu modelo 3D' }),
       h('p', {
         class: 'dropzone-hint',
-        textContent: 'Planos: conversión local con extrude serve · .yaml opcional',
+        textContent: 'Abre modelos GLB/GLTF o convierte planos DWG/DXF con el destino indicado.',
       }),
+      h(
+        'div',
+        { class: 'format-tags', attrs: { 'aria-label': 'Formatos admitidos' } },
+        ...FORMAT_TAGS.map((tag) => h('span', { class: 'format-tag', textContent: tag })),
+      ),
       button({
-        label: 'Examinar archivo local',
-        variant: 'secondary',
+        label: 'Elegir archivo',
+        icon: 'open',
+        variant: 'primary',
         onClick: (e) => {
           e.stopPropagation();
           input.click();
@@ -97,6 +127,31 @@ export class WelcomeScreen {
       if (e.key === 'Enter' || e.key === ' ') input.click();
     });
 
+    const destinationInfo = h(
+      'section',
+      { class: 'conversion-destination', attrs: { 'aria-label': 'Destino de los planos' } },
+      h('strong', { textContent: 'Destino de conversión' }),
+      h('code', {
+        textContent: destination.error ? 'Destino inválido · envío bloqueado' : destination.server,
+      }),
+      h('p', { textContent: destination.description }),
+    );
+    this.destinationConsent = null;
+    if (destination.requiresAcceptance) {
+      const consent = h('input', { type: 'checkbox', checked: false });
+      consent.addEventListener('change', () => destination.setAccepted(consent.checked));
+      this.destinationConsent = consent;
+      destinationInfo.append(
+        h('p', { textContent: 'Este destino remoto procede del enlace que has abierto.' }),
+        h(
+          'label',
+          { class: 'conversion-consent' },
+          consent,
+          `Acepto enviar los planos y su configuración a ${destination.server}`,
+        ),
+      );
+    }
+
     this.progressBar = h('div', { class: 'progress-fill' });
     this.progressLabel = h('span', { class: 'progress-label' });
     this.progressValue = h('span', { class: 'progress-value' });
@@ -106,7 +161,18 @@ export class WelcomeScreen {
       h('div', { class: 'progress-row' }, this.progressLabel, this.progressValue),
       h('div', { class: 'progress-track' }, this.progressBar),
     );
+    this.cancelButton = button({
+      label: 'Cancelar espera',
+      variant: 'ghost',
+      size: 'sm',
+      title: 'Detener la espera del visor; el trabajo puede continuar en el servidor',
+      onClick: () => handlers.onCancel?.(),
+    });
+    this.progress.append(this.cancelButton);
+    this.cancelButton.hidden = true;
     this.error = h('div', { class: 'welcome-error', hidden: true, attrs: { role: 'alert' } });
+    this.retryButton = button({ label: 'Reintentar', onClick: () => handlers.onRetry?.() });
+    this.retryButton.hidden = true;
 
     const gallery = h('div', { class: 'samples' });
     for (const sample of SAMPLE_MODELS) {
@@ -143,19 +209,29 @@ export class WelcomeScreen {
         h(
           'header',
           { class: 'welcome-header' },
-          h('span', { class: 'brand-mark' }, icon('logo', 16)),
-          h('span', { class: 'welcome-title', textContent: 'Extrude' }),
-          h('span', { class: 'version', textContent: `v${APP_VERSION}` }),
-          h('span', { class: 'spacer' }),
+          h('span', { class: 'brand-mark' }, icon('logo', 28)),
+          h(
+            'div',
+            { class: 'row' },
+            h('h1', { class: 'welcome-title', textContent: 'Extrude' }),
+            h('span', { class: 'version', textContent: `v${APP_VERSION}` }),
+          ),
+          h('p', {
+            class: 'welcome-tagline',
+            textContent:
+              'De plano DWG/DXF a modelo 3D, con sol real y vistas listas para presentar.',
+          }),
           this.closeButton,
         ),
         h(
           'div',
           { class: 'welcome-body' },
           this.dropzone,
+          destinationInfo,
           this.progress,
           this.error,
-          h('div', { class: 'samples-label', textContent: 'Ejemplos' }),
+          this.retryButton,
+          h('div', { class: 'samples-label', textContent: 'O prueba con un ejemplo' }),
           gallery,
         ),
         h('footer', { class: 'welcome-footer' }, shortcuts),
@@ -192,16 +268,18 @@ export class WelcomeScreen {
     return this.busy;
   }
 
-  startProgress(): void {
+  startProgress(cancelable = false): void {
     this.busy = true;
+    if (this.destinationConsent) this.destinationConsent.disabled = true;
     this.clearError();
     this.element.classList.add('is-busy');
     this.progress.hidden = false;
+    this.cancelButton.hidden = !cancelable;
     this.setProgress('read', null);
   }
 
-  setProgress(stage: LoadStage | 'convert', fraction: number | null): void {
-    this.progressLabel.textContent = STAGE_LABEL[stage];
+  setProgress(stage: ProgressStage, fraction: number | null): void {
+    this.progressLabel.textContent = stageLabel(stage);
     const indeterminate = fraction === null;
     this.progress.classList.toggle('is-indeterminate', indeterminate);
     this.progressValue.textContent = indeterminate ? '' : `${Math.round(fraction * 100)}%`;
@@ -210,6 +288,7 @@ export class WelcomeScreen {
 
   endProgress(): void {
     this.busy = false;
+    if (this.destinationConsent) this.destinationConsent.disabled = false;
     this.element.classList.remove('is-busy');
     this.progress.hidden = true;
   }
@@ -219,7 +298,13 @@ export class WelcomeScreen {
     this.error.hidden = false;
   }
 
+  setRetry(label: string | null): void {
+    this.retryButton.hidden = label === null;
+    this.retryButton.textContent = label ?? '';
+  }
+
   private clearError(): void {
     this.error.hidden = true;
+    this.retryButton.hidden = true;
   }
 }

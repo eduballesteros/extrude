@@ -1,19 +1,14 @@
-import fs from 'fs';
+// Compatibilidad: todos los formatos se generan desde make-icons.py.
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-// Isometric unit vectors:
-const cos30 = Math.cos(Math.PI / 6); // ~0.8660
-const sin30 = Math.sin(Math.PI / 6); // 0.5
-
-/**
- * Projects 3D (x, y, z) to 2D (px, py):
- * x: right-down (along isometric 30°)
- * y: left-down (along isometric 150°)
- * z: straight up (+Z)
- */
-function iso(x, y, z, ox = 32, oy = 32) {
-  const px = ox + (x - y) * cos30;
-  const py = oy + (x + y) * sin30 - z;
-  return `${px.toFixed(1)},${py.toFixed(1)}`;
-}
-
-console.log('Projector ready');
+const script = fileURLToPath(new URL('./make-icons.py', import.meta.url));
+const result = spawnSync(
+  'uv',
+  ['run', '--no-project', '--with', 'pillow==11.3.0', 'python', script],
+  {
+    stdio: 'inherit',
+  },
+);
+if (result.error) console.error(result.error.message);
+process.exit(result.status ?? 1);

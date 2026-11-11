@@ -1,14 +1,32 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0c0d0e" />
+    <meta name="theme-color" content="#e2e3de" />
+    <meta name="application-name" content="Extrude" />
+    <meta name="apple-mobile-web-app-title" content="Extrude" />
     <meta name="description" content="Extrude: conversión DWG/DXF a 3D y visor con estudio solar" />
     <title>Extrude</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <script>
+      // Tema antes de pintar (sin parpadeo): preferencia guardada o la del sistema. Ver ui/theme.ts.
+      (function () {
+        var theme = 'light';
+        try {
+          var saved = localStorage.getItem('extrude-theme');
+          if (saved === 'light' || saved === 'dark') theme = saved;
+          else if (matchMedia('(prefers-color-scheme: dark)').matches) theme = 'dark';
+        } catch (e) {}
+        document.documentElement.dataset.theme = theme;
+        document
+          .querySelector('meta[name="theme-color"]')
+          .setAttribute('content', theme === 'dark' ? '#07112c' : '#e2e3de');
+      })();
+    </script>
   </head>
   <body>
     <main id="viewport" aria-label="Vista 3D"></main>

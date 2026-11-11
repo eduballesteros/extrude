@@ -119,6 +119,54 @@ describe('vistas', () => {
 });
 
 describe('views.json', () => {
+  it.each([
+    ['render.width', 0],
+    ['render.height', -1],
+    ['render.width', 1.5],
+    ['camera.fovDeg', 0],
+    ['camera.fovDeg', 180],
+    ['camera.orthoSize', 0],
+    ['camera.near', -1],
+    ['camera.far', 0.01],
+    ['camera.up', [0, 0, 0]],
+    ['camera.target', [10, 20, 30]],
+    ['camera.position', [1e300, 0, 0]],
+    ['sun.lat', 91],
+    ['sun.isoDate', '2024-02-30T12:00:00Z'],
+    ['sun.intensity', -1],
+    ['sun.mode', 'wrong'],
+    ['ambient.background', 'wrong'],
+    ['ground.enabled', 'yes'],
+    ['tonemapping.exposure', -1],
+    ['shadows.mapSize', 3000],
+    ['shadows.enabled', null],
+    ['lights.0.intensity', -1],
+    ['lights.0.angleDeg', 0],
+    ['lights.0.target', [0, 10, 0]],
+    ['layers.EDIFICIOS.visible', 1],
+  ])('rechaza %s con error por campo', (field, value) => {
+    const view = sampleView();
+    const keys = field.split('.');
+    let obj = view as unknown as Record<string, unknown>;
+    for (const key of keys.slice(0, -1)) obj = obj[key] as Record<string, unknown>;
+    obj[keys.at(-1)!] = value;
+    const expected = field
+      .replace('.0.', '[0].')
+      .replace('layers.EDIFICIOS', 'layers["EDIFICIOS"]');
+    expect(() => parseViewsFile(JSON.stringify({ schemaVersion: 1, views: [view] }))).toThrow(
+      `views[0].${expected}`,
+    );
+  });
+
+  it('permite clipping ortográfico negativo válido y rechaza near >= far', () => {
+    const view = sampleView();
+    view.camera.type = 'orthographic';
+    view.camera.near = -5000;
+    const parse = () => parseViewsFile(JSON.stringify({ schemaVersion: 1, views: [view] }));
+    expect(parse().views[0]!.camera.near).toBe(-5000);
+    view.camera.near = view.camera.far;
+    expect(parse).toThrow('camera.far');
+  });
   it('serializa con schemaVersion, origen y cámara en coordenadas reales', () => {
     const file = toViewsFile([sampleView()], MODEL, 'test');
     expect(file.schemaVersion).toBe(VIEWS_SCHEMA_VERSION);

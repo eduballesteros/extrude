@@ -6,24 +6,30 @@ import {
   Raycaster,
   Scene,
   SRGBColorSpace,
+  type Texture,
   Vector2,
   WebGLRenderer,
 } from 'three';
+import { disposeObject } from './scene/dispose';
 import { loadHdri } from './scene/environment';
+import { misplacedLayers, misplacedMessage } from './scene/groundCheck';
+import { MeasureTool } from './scene/measure';
 import { Ground } from './scene/ground';
 import { LayerManager } from './scene/layers';
 import { SceneLighting } from './scene/lighting';
 import { ExtraLights, newLightState } from './scene/lights';
 import {
+  isManifestUrl,
   type LoadedModel,
   loadFromFile,
+  loadFromManifest,
   loadFromUrl,
   nextFrame,
   type ProgressCallback,
 } from './scene/loader';
 import { boundsOf, Navigation, type ViewPreset } from './scene/navigation';
 import { describeHit, firstVisibleHit } from './scene/picking';
-import { composeIso, splitIso } from './scene/sun';
+import { composeIso, geolocate, splitIso } from './scene/sun';
 import { defaultState, type LightType, type Vec3, type ViewerState } from './state';
 import { InfoPanel } from './ui/info';
 import { StatsOverlay } from './ui/stats';
@@ -63,6 +69,8 @@ export class App {
   readonly info: InfoPanel;
   readonly ground = new Ground();
   readonly stats: StatsOverlay;
+  /** Regla 3D (tecla M): mientras está activa, los clics miden en vez de inspeccionar. */
+  readonly measure: MeasureTool;
   model: LoadedModel | null = null;
   sceneBox: Box3 | null = null;
   /** Tipo de luz pendiente de colocar con el siguiente clic. */
@@ -77,7 +85,13 @@ export class App {
   private shadowsDirty = true;
 
   constructor(private readonly container: HTMLElement) {
-    this.renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: false });
+    // Profundidad logarítmica: terrenos de varios km con capas a pocos cm del suelo (vegetación,
+    // viales drapeados) parpadean (z-fighting) con el buffer lineal de 24 bits al acercarse.
+    this.renderer = new WebGLRenderer({
+      antialias: true,
+      preserveDrawingBuffer: false,
+      logarithmicDepthBuffer: true,
+    });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.outputColorSpace = SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
@@ -103,6 +117,8 @@ export class App {
     this.raycaster.params.Line = { threshold: LINE_PICK_THRESHOLD_M };
     this.scene.add(this.ground.mesh);
     container.append(this.info.element);
+    this.measure = new MeasureTool(container, () => this.emit('state'));
+    this.scene.add(this.measure.group);
 
     this.bindPointer();
     // Los paneles acoplados cambian el tamaño del visor sin redimensionar la ventana
@@ -129,35 +145,36 @@ export class App {
     for (const listener of this.listeners[event]) listener();
   }
 
-  /** `name` identifica el modelo (vistas guardadas, script de Blender); por defecto, el archivo. */
+  /**
+   * `name` identifica el modelo (vistas guardadas, script de Blender); por defecto, el archivo.
+   * Una URL a `manifest.json` abre el conjunto teselado de `extrude convert --tiles`.
+   */
   async load(
     source: string | File,
     name?: string,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<LoadedModel> {
     const model =
-      typeof source === 'string'
-        ? await loadFromUrl(source, name, onProgress)
-        : await loadFromFile(source, onProgress);
+      typeof source !== 'string'
+        ? await loadFromFile(source, onProgress)
+        : isManifestUrl(source)
+          ? await loadFromManifest(source, name, onProgress, signal)
+          : await loadFromUrl(source, name, onProgress, signal);
     onProgress?.('prepare', null);
     await nextFrame();
+    if (signal?.aborted) {
+      disposeObject(model.root);
+      signal.throwIfAborted();
+    }
     this.setModel(model);
     return model;
   }
 
   /** Cierra el modelo y libera su memoria de GPU (vuelta a la pantalla de inicio). */
   unload(): void {
-    const model = this.model;
-    if (!model) return;
-    this.scene.remove(model.root);
-    model.root.traverse((o: Object3D) => {
-      const mesh = o as Mesh;
-      if (!mesh.isMesh) return;
-      mesh.geometry.dispose();
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const m of materials) m.dispose();
-    });
-    this.model = null;
+    if (!this.model) return;
+    this.releaseModel();
     this.animation.playing = false;
     this.layers.attach(new Group());
     this.state.layers = {};
@@ -165,6 +182,16 @@ export class App {
     this.renderer.clear();
     this.emit('model');
     this.emit('state');
+  }
+
+  /** Activa o desactiva la regla: cursor de mirilla y clics para medir. */
+  setMeasuring(active: boolean): void {
+    if (active) {
+      this.placing = null;
+      this.info.hide();
+    }
+    this.container.classList.toggle('is-measuring', active);
+    this.measure.setActive(active);
   }
 
   /** Reproduce o pausa la animación del día (y avisa a la interfaz). */
@@ -187,8 +214,41 @@ export class App {
     this.emit('state');
   }
 
+  /** Quita el modelo actual de la escena y libera su memoria de GPU (sin tocar la interfaz). */
+  private releaseModel(): void {
+    const model = this.model;
+    if (!model) return;
+    this.measure.clear(); // los puntos eran del modelo anterior
+    this.scene.remove(model.root);
+    // El entorno (cielo/HDRI) es de SceneLighting y se reutiliza con el siguiente modelo
+    const keep = new Set<Texture>();
+    for (const t of [this.scene.environment, this.scene.background]) {
+      if ((t as Texture | null)?.isTexture) keep.add(t as Texture);
+    }
+    disposeObject(model.root, keep);
+    this.model = null;
+  }
+
+  /** Lleva el sol al centro geográfico del modelo (si el pipeline lo calculó desde su CRS). */
+  private geolocateSun(model: LoadedModel): boolean {
+    const place = geolocate(this.state.sun.isoDate, model.extras);
+    if (!place) return false;
+    const sun = this.state.sun;
+    sun.lat = place.lat;
+    sun.lon = place.lon;
+    sun.isoDate = place.isoDate;
+    const where = `${place.lat.toFixed(4)}°, ${place.lon.toFixed(4)}°`;
+    const crs = model.extras?.crs ? ` (${model.extras.crs})` : '';
+    const sign = place.utcOffsetH < 0 ? '−' : '+';
+    const zone = place.zoneChanged
+      ? `. Zona horaria aproximada UTC${sign}${Math.abs(place.utcOffsetH)}: ajústala si hace falta`
+      : '';
+    this.notify(`Sol situado en el centro del plano${crs}: ${where}${zone}.`, 'info');
+    return true;
+  }
+
   private setModel(model: LoadedModel): void {
-    if (this.model) this.scene.remove(this.model.root);
+    this.releaseModel();
     this.model = model;
     model.root.traverse((o: Object3D) => {
       const mesh = o as Mesh;
@@ -207,9 +267,13 @@ export class App {
     this.state.layers = this.layers.initialState();
     // Con terreno propio (TIN), el suelo auxiliar sobra y competiría con él en profundidad
     this.state.ground.enabled = ![...this.layers.layers.values()].some((l) => l.kind === 'terrain');
+    const located = this.geolocateSun(model);
     this.info.hide();
     this.applyAll();
     this.emit('model');
+    if (located) this.emit('state');
+    const misplaced = misplacedLayers(model.root);
+    if (misplaced.length) this.notify(misplacedMessage(misplaced), 'warning');
   }
 
   // --- Aplicar estado -------------------------------------------------------
@@ -301,6 +365,7 @@ export class App {
       this.onClick(e);
     });
     dom.addEventListener('dblclick', (e) => {
+      if (this.measure.active) return; // el doble clic serían dos puntos de medida
       const hit = this.hitAt(e);
       if (hit) this.nav.focus(hit.point);
     });
@@ -319,6 +384,10 @@ export class App {
 
   private onClick(event: MouseEvent): void {
     const hit = this.hitAt(event);
+    if (this.measure.active) {
+      if (hit) this.measure.addPoint(hit.point);
+      return;
+    }
     if (this.placing) {
       if (!hit) return;
       const normal = hit.face?.normal.clone().transformDirection(hit.object.matrixWorld);
@@ -357,6 +426,8 @@ export class App {
     }
     this.lighting.update(now);
     this.lights.update();
+    const { clientWidth: w, clientHeight: h } = this.container;
+    this.measure.update(this.nav.camera, w, h);
     this.renderer.render(this.scene, this.nav.camera);
     this.stats.update(now);
   }

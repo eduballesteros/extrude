@@ -1,5 +1,48 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CONFIG_HEADER, ConversionClient, ConversionError, hasExtension } from './client';
+import {
+  CONFIG_HEADER,
+  ConversionClient,
+  ConversionError,
+  convertedModel,
+  hasExtension,
+} from './client';
+
+describe('teselas', () => {
+  const client = new ConversionClient('http://127.0.0.1:8765');
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('pide la conversión teselada con ?tiles= y abre el manifest', async () => {
+    const files = {
+      glb: null,
+      manifest: '/api/jobs/abc/manifest.json',
+      report_md: '/api/jobs/abc/report.md',
+      report_json: '/api/jobs/abc/report.json',
+      config: '/api/jobs/abc/config.yaml',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ job: 'abc', files }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await client.convert(new File(['x'], 'plano 1.dxf'), null, { tiles: 500 });
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      'http://127.0.0.1:8765/api/convert?name=plano%201.dxf&tiles=500&async=1',
+    );
+    expect(convertedModel(result)).toEqual({ kind: 'tiles', url: '/api/jobs/abc/manifest.json' });
+    expect(convertedModel({ ...result, files: { ...files, glb: '/m.glb' } })).toEqual({
+      kind: 'glb',
+      url: '/m.glb',
+    });
+    expect(convertedModel({ ...result, files: { ...files, manifest: null } })).toBeNull();
+  });
+
+  it.each([0, NaN, Infinity, -Infinity])('rechaza el tamaño de tesela %s', async (tiles) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const file = new File(['x'], 'plano.dxf');
+    await expect(client.convert(file, null, { tiles })).rejects.toThrow(/tesela/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
 
 const client = new ConversionClient('http://127.0.0.1:8765');
 
@@ -24,7 +67,7 @@ describe('ConversionClient', () => {
     const file = new File(['0\nEOF\n'], 'Manzana Ñ.dxf');
     await client.convert(file, 'layers:\n  - match: "EDIFICACIÓN"\n    kind: building\n');
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://127.0.0.1:8765/api/convert?name=Manzana%20%C3%91.dxf');
+    expect(url).toBe('http://127.0.0.1:8765/api/convert?name=Manzana%20%C3%91.dxf&async=1');
     expect(init.body).toBe(file);
     const header = (init.headers as Record<string, string>)[CONFIG_HEADER]!;
     const decoded = new TextDecoder().decode(Uint8Array.from(atob(header), (c) => c.charCodeAt(0)));

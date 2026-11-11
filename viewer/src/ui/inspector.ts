@@ -399,9 +399,9 @@ export class Inspector {
     const { element, body } = section('Sombras');
     const mode = segmented<ShadowMode>(
       [
-        { value: 'off', label: 'Apagadas' },
-        { value: 'pcf', label: 'PCF', title: 'Percentage-closer filtering' },
-        { value: 'vsm', label: 'VSM', title: 'Variance shadow maps (más suaves)' },
+        { value: 'off', label: 'Sin sombras' },
+        { value: 'pcf', label: 'Definidas', title: 'Bordes nítidos (PCF)' },
+        { value: 'vsm', label: 'Suaves', title: 'Bordes difuminados (VSM)' },
       ],
       shadowMode(s.enabled, s.type),
       (m) => {
@@ -413,7 +413,7 @@ export class Inspector {
     );
     mode.element.classList.add('segmented-full');
     const radius = slider({
-      label: 'Radio',
+      label: 'Suavizado',
       min: 0,
       max: 10,
       step: 0.1,
@@ -440,13 +440,13 @@ export class Inspector {
       onInput: (v) => ((s.normalBias = v), app.applyShadows()),
     });
     const size = select(
-      'Mapa',
+      'Resolución',
       MAP_SIZES.map((n) => ({ value: String(n), label: `${n} px` })),
       String(s.mapSize),
       (v) => ((s.mapSize = Number(v)), app.applyShadows()),
     );
     const fit = select(
-      'Ajuste',
+      'Cobertura',
       [
         { value: 'auto', label: 'Automático' },
         { value: 'scene', label: 'Toda la escena' },
@@ -455,15 +455,14 @@ export class Inspector {
       s.fit,
       (v) => ((s.fit = v), app.applyShadows()),
     );
-    const options = h(
-      'div',
-      { class: 'stack' },
-      radius.element,
-      bias.element,
-      normalBias.element,
-      size.element,
-      fit.element,
+    // Lo habitual a la vista; los parámetros finos (acné, despegue) en "Ajustes avanzados"
+    const advanced = h(
+      'details',
+      { class: 'advanced' },
+      h('summary', { textContent: 'Ajustes avanzados' }),
+      h('div', { class: 'stack' }, bias.element, normalBias.element, size.element),
     );
+    const options = h('div', { class: 'stack' }, radius.element, fit.element, advanced);
     this.refreshers.push(() => {
       mode.set(shadowMode(s.enabled, s.type));
       radius.set(s.radius);

@@ -116,3 +116,41 @@ export function kelvinToRgb(kelvin: number): [number, number, number] {
   const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
   return [clamp(r), clamp(g), clamp(b)];
 }
+
+/** Diferencia máxima (h) entre la zona horaria y la hora solar media antes de corregirla. */
+export const MAX_ZONE_DRIFT_H = 3.5;
+
+export interface Geolocation {
+  lat: number;
+  lon: number;
+  /** Desfase UTC (h) para la fecha; distinto del anterior solo si no encajaba con la longitud. */
+  utcOffsetH: number;
+  /** El desfase se ha cambiado por uno aproximado (round(lon / 15)). */
+  zoneChanged: boolean;
+  isoDate: string;
+}
+
+/**
+ * Sitúa el sol en el centro geográfico del modelo (`center_lat` / `center_lon` del pipeline).
+ * Conserva la fecha y la hora local; la zona horaria solo se cambia si la actual no puede ser de
+ * ese lugar (más de MAX_ZONE_DRIFT_H horas de la hora solar media), p. ej. UTC+2 en Tokio.
+ */
+export function geolocate(
+  isoDate: string,
+  extras: { center_lat?: number | null; center_lon?: number | null } | null | undefined,
+): Geolocation | null {
+  const lat = extras?.center_lat;
+  const lon = extras?.center_lon;
+  if (typeof lat !== 'number' || typeof lon !== 'number') return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90) return null;
+  const { day, hours, utcOffsetH } = splitIso(isoDate);
+  const zoneChanged = Math.abs(utcOffsetH - lon / 15) > MAX_ZONE_DRIFT_H;
+  const offset = zoneChanged ? Math.round(lon / 15) : utcOffsetH;
+  return {
+    lat,
+    lon,
+    utcOffsetH: offset,
+    zoneChanged,
+    isoDate: zoneChanged ? composeIso(day, hours, offset) : isoDate,
+  };
+}

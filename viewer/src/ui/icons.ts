@@ -74,7 +74,11 @@ export const ICONS = {
   refresh: svg(
     '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/>',
   ),
+  moon: svg('<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>'),
   close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+  ruler: svg(
+    '<path d="M3.5 15.5 15.5 3.5l5 5-12 12z"/><path d="m7 12 1.5 1.5"/><path d="m9.5 9.5 2 2"/><path d="m12 7 1.5 1.5"/>',
+  ),
   'chevron-down': svg('<path d="m6 9 6 6 6-6"/>'),
   check: svg('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
   alert: svg('<path d="M12 3 2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17.5v.01"/>'),

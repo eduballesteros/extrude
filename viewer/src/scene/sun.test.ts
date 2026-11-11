@@ -1,6 +1,15 @@
 import SunCalc from 'suncalc';
 import { describe, expect, it } from 'vitest';
-import { composeIso, kelvinToRgb, localHours, splitIso, sunAngles, sunDirection } from './sun';
+import {
+  composeIso,
+  geolocate,
+  kelvinToRgb,
+  localHours,
+  splitIso,
+  sunAngles,
+  sunDirection,
+  sunTimes,
+} from './sun';
 
 const OBLIQUITY = 23.44;
 const MADRID = { lat: 40.4168, lon: -3.7038 };
@@ -110,5 +119,56 @@ describe('kelvinToRgb', () => {
     const [r3, , b3] = kelvinToRgb(12000);
     expect(b3).toBe(1);
     expect(r3).toBeLessThan(0.85);
+  });
+});
+
+describe('geolocate: sol en el centro geográfico del modelo', () => {
+  const SUMMER_NOON_MADRID = '2024-06-21T12:00:00+02:00';
+
+  it('sin center_lat/center_lon (o no numéricos) no cambia nada', () => {
+    expect(geolocate(SUMMER_NOON_MADRID, null)).toBeNull();
+    expect(geolocate(SUMMER_NOON_MADRID, { center_lat: null, center_lon: null })).toBeNull();
+    expect(geolocate(SUMMER_NOON_MADRID, { center_lat: 120, center_lon: 0 })).toBeNull();
+  });
+
+  it('Valencia y Galicia conservan la hora oficial española (UTC+2 en verano)', () => {
+    for (const [lat, lon] of [
+      [39.4707, -0.3751],
+      [42.88, -8.54],
+    ] as const) {
+      const place = geolocate(SUMMER_NOON_MADRID, { center_lat: lat, center_lon: lon })!;
+      expect(place).toMatchObject({ lat, lon, utcOffsetH: 2, zoneChanged: false });
+      expect(place.isoDate).toBe(SUMMER_NOON_MADRID);
+    }
+  });
+
+  it('Tokio: UTC+2 es imposible allí; pasa a UTC+9 con la misma hora local', () => {
+    const place = geolocate(SUMMER_NOON_MADRID, { center_lat: 35.6873, center_lon: 139.7401 })!;
+    expect(place.zoneChanged).toBe(true);
+    expect(place.utcOffsetH).toBe(9);
+    expect(place.isoDate).toBe('2024-06-21T12:00:00+09:00');
+  });
+
+  it('con el lugar y la zona corregidos el sol del mediodía local queda alto y al sur', () => {
+    for (const [lat, lon] of [
+      [35.6873, 139.7401], // Tokio
+      [19.4172, -99.1619], // Ciudad de México (UTC−7 aproximado)
+    ] as const) {
+      const place = geolocate(SUMMER_NOON_MADRID, { center_lat: lat, center_lon: lon })!;
+      const { day, utcOffsetH } = splitIso(place.isoDate);
+      const times = sunTimes(day, lat, lon, utcOffsetH);
+      expect(times.sunrise!).toBeLessThan(12);
+      expect(times.sunset!).toBeGreaterThan(12);
+      const angles = sunAngles(new Date(place.isoDate), lat, lon);
+      expect(angles.elevationDeg).toBeGreaterThan(45);
+    }
+  });
+
+  it('hemisferio sur (Santiago, invierno austral): mediodía con el sol al norte', () => {
+    const place = geolocate(SUMMER_NOON_MADRID, { center_lat: -33.4554, center_lon: -70.657 })!;
+    expect(place.utcOffsetH).toBe(-5);
+    const angles = sunAngles(new Date(place.isoDate), place.lat, place.lon);
+    expect(angles.elevationDeg).toBeGreaterThan(20);
+    expect(Math.min(angles.azimuthDeg, 360 - angles.azimuthDeg)).toBeLessThan(60);
   });
 });

@@ -118,15 +118,13 @@ describe('controles del inspector', () => {
 });
 
 describe('barra superior, vistas e inspección', () => {
-  it('distintivo de origen: CRS o recentrado con X, Y', () => {
+  it('distintivo de origen: solo el CRS (el desplazamiento va en el título emergente)', () => {
     expect(originBadge(null)).toBeNull();
     expect(originBadge({ origin_offset: [0, 0, 0], crs: null } as never)).toBeNull();
     expect(
       originBadge({ origin_offset: [440123.4, 4474567.8, 0], crs: 'EPSG:25830' } as never),
-    ).toBe('EPSG:25830: 440123, 4474568');
-    expect(originBadge({ origin_offset: [10, 20, 0], crs: null } as never)).toBe(
-      'Recentrado: 10, 20',
-    );
+    ).toBe('EPSG:25830');
+    expect(originBadge({ origin_offset: [10, 20, 0], crs: null } as never)).toBeNull();
   });
 
   it('formato de render rápido o personalizado', () => {

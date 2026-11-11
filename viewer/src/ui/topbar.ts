@@ -4,6 +4,7 @@ import type { CameraType } from '../state';
 import type { ViewManager } from '../views/viewManager';
 import { button, h, icon, pickFile, segmented } from './dom';
 import type { IconName } from './icons';
+import { currentTheme, toggleTheme } from './theme';
 
 export interface DownloadLink {
   label: string;
@@ -28,12 +29,9 @@ export interface TopBarHandlers {
  * metros (ejes del DWG). null si el modelo no está desplazado ni tiene CRS.
  */
 export function originBadge(extras: SceneExtras | null | undefined): string | null {
-  if (!extras) return null;
-  const [x, y] = extras.origin_offset;
-  const moved = Math.abs(x) > 0.001 || Math.abs(y) > 0.001;
-  if (!extras.crs && !moved) return null;
-  const label = extras.crs ?? 'Recentrado';
-  return moved ? `${label}: ${x.toFixed(0)}, ${y.toFixed(0)}` : label;
+  // Solo el sistema de referencia: el desplazamiento de origen es un detalle técnico y va en el
+  // título emergente de la etiqueta y del nombre del modelo.
+  return extras?.crs ?? null;
 }
 
 /** Barra superior del espacio de trabajo (36 px). */
@@ -43,6 +41,8 @@ export class TopBar {
   private readonly badge = h('span', { class: 'badge mono', hidden: true });
   private readonly projection: ReturnType<typeof segmented<CameraType>>;
   private readonly menu = h('div', { class: 'menu', hidden: true, attrs: { role: 'menu' } });
+  private readonly measureButton: HTMLButtonElement;
+  private readonly themeButton: HTMLButtonElement;
   private downloads: DownloadLink[] = [];
 
   constructor(
@@ -61,6 +61,27 @@ export class TopBar {
         app.applyCamera();
       },
     );
+
+    this.measureButton = button({
+      label: 'Medir',
+      icon: 'ruler',
+      title: 'Medir distancias y desniveles (M) · Esc borra',
+      variant: 'ghost',
+      size: 'sm',
+      onClick: () => app.setMeasuring(!app.measure.active),
+    });
+    this.measureButton.setAttribute('aria-pressed', 'false');
+
+    this.themeButton = button({
+      icon: currentTheme() === 'dark' ? 'sun' : 'moon',
+      title: 'Cambiar entre tema claro y oscuro',
+      variant: 'ghost',
+      size: 'sm',
+      onClick: () => {
+        const theme = toggleTheme();
+        this.themeButton.replaceChildren(icon(theme === 'dark' ? 'sun' : 'moon'));
+      },
+    });
 
     const exportButton = button({ label: 'Exportar', variant: 'primary', size: 'sm' });
     exportButton.append(icon('chevron-down', 12));
@@ -97,10 +118,12 @@ export class TopBar {
           size: 'sm',
           onClick: () => app.nav.frame(),
         }),
+        this.measureButton,
       ),
       h(
         'div',
         { class: 'topbar-right' },
+        this.themeButton,
         button({
           icon: 'zen',
           title: 'Ocultar/mostrar paneles (Tab)',
@@ -121,7 +144,11 @@ export class TopBar {
       ),
     );
     document.body.append(this.element);
-    app.on('state', () => this.projection.set(app.state.camera.type));
+    app.on('state', () => {
+      this.projection.set(app.state.camera.type);
+      this.measureButton.classList.toggle('is-active', app.measure.active);
+      this.measureButton.setAttribute('aria-pressed', String(app.measure.active));
+    });
   }
 
   setModel(model: LoadedModel): void {
@@ -134,6 +161,10 @@ export class TopBar {
     this.badge.title = offset
       ? `origin_offset (m, ejes DWG): ${offset.map((v) => v.toFixed(3)).join(', ')} · coordenadas reales = escena + offset`
       : '';
+    if (offset && offset.some((v) => Math.abs(v) > 0.001)) {
+      const [x, y] = offset;
+      this.modelName.title = `${model.name}\nRecentrado en ${x.toFixed(0)}, ${y.toFixed(0)} m (coordenadas del dibujo)`;
+    }
     this.projection.set(this.app.state.camera.type);
   }
 

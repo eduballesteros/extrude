@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { LayerManager } from './layers';
+import type { LayerState } from '../state';
 import { describeHit, firstVisibleHit } from './picking';
 
 /** Escena con la misma forma que el GLB del pipeline: nodo de capa con extras. */
@@ -37,6 +38,25 @@ function pipelineLikeScene(): { root: Group; buildings: Mesh; trees: InstancedMe
 }
 
 describe('LayerManager', () => {
+  it('serializa y aplica nombres de capa especiales como propiedades propias', () => {
+    const root = new Group();
+    const node = new Group();
+    node.userData = { layer: '__proto__', visible: false };
+    root.add(node);
+    const manager = new LayerManager();
+    manager.attach(root);
+    const state = manager.initialState();
+    expect(Object.getPrototypeOf(state)).toBeNull();
+    expect(Object.keys(state)).toEqual(['__proto__']);
+    expect(JSON.parse(JSON.stringify(state))).toEqual(
+      JSON.parse('{"__proto__":{"visible":false}}'),
+    );
+    manager.apply(JSON.parse(JSON.stringify(state)) as Record<string, LayerState>);
+    expect(node.visible).toBe(false);
+    LayerManager.showAll(state);
+    manager.apply(state);
+    expect(node.visible).toBe(true);
+  });
   it('descubre capas, visibilidad inicial y colores originales', () => {
     const { root } = pipelineLikeScene();
     const manager = new LayerManager();

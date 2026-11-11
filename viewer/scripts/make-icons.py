@@ -82,8 +82,9 @@ def main() -> None:
     (PUBLIC / "logo-mark.svg").write_text(svg(background=False), encoding="utf-8")
     # A 16 px el trazo se engrosa un poco para que no se pierda
     icons = [png(16, stroke=6.0), png(32), png(48)]
-    icons[0].save(PUBLIC / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)], append_images=icons[1:])
+    icons[-1].save(PUBLIC / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)], append_images=icons[:-1])
     png(180, rounded=False).save(PUBLIC / "apple-touch-icon.png")
+    png(192).save(PUBLIC / "icon-192.png")
     png(512).save(PUBLIC / "icon-512.png")
     print("Iconos escritos en", PUBLIC)
 

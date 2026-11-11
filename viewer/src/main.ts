@@ -3,21 +3,27 @@ import { App } from './app';
 import {
   CONFIG_EXTENSIONS,
   ConversionClient,
+  ConversionCancelledError,
   ConversionError,
-  DEFAULT_SERVER,
+  ConversionTimeoutError,
+  convertedModel,
+  DEFAULT_TIMEOUT_MS,
   DRAWING_EXTENSIONS,
   hasExtension,
 } from './convert/client';
-import type { LoadedModel, LoadStage } from './scene/loader';
+import { ConversionSession } from './convert/session';
+import { ConversionDestination } from './convert/destination';
+import { type LoadedModel, ModelDownloadError } from './scene/loader';
 import { FrameOverlay } from './ui/frameOverlay';
 import { Inspector } from './ui/inspector';
 import { LayersPanel } from './ui/layersPanel';
+import { QualitySummary } from './ui/qualitySummary';
 import { Sidebar } from './ui/sidebar';
 import { Toasts } from './ui/toast';
 import { TopBar } from './ui/topbar';
 import { ViewCubeWidget } from './ui/viewCubeWidget';
 import { ViewsPanel } from './ui/viewsPanel';
-import { WelcomeScreen } from './ui/welcome';
+import { type ProgressStage, WelcomeScreen } from './ui/welcome';
 import { ViewManager } from './views/viewManager';
 
 const MODEL_EXTENSIONS = ['.glb', '.gltf'];
@@ -35,8 +41,11 @@ new Toasts();
 
 const params = new URLSearchParams(window.location.search);
 const configuredServer = import.meta.env['VITE_EXTRUDE_SERVER'] as string | undefined;
-const client = new ConversionClient(params.get('server') ?? configuredServer ?? DEFAULT_SERVER);
+const destination = new ConversionDestination(params.get('server'), configuredServer);
+const client = new ConversionClient(destination.server, () => destination.assertUploadAllowed());
 let configYaml: { name: string; text: string } | null = null;
+/** ?tiles=500: los planos se convierten en teselas de 500 m (tiles/ + manifest.json). */
+const tileSize = Number(params.get('tiles')) || undefined;
 
 // --- Espacio de trabajo -----------------------------------------------------------
 
@@ -64,7 +73,9 @@ new Sidebar(
   'Inspector',
 );
 const cube = new ViewCubeWidget(app);
-viewport.append(cube.element, app.stats.element);
+const quality = new QualitySummary();
+viewport.append(cube.element, app.stats.element, quality.element);
+app.on('model', () => quality.clear());
 
 function toggleZen(force?: boolean): void {
   document.body.classList.toggle('is-zen', force);
@@ -72,11 +83,20 @@ function toggleZen(force?: boolean): void {
 
 // --- Pantalla de inicio y carga ---------------------------------------------------
 
-const welcome = new WelcomeScreen({
-  onFile: (file) => void open(file),
-  onSample: (sample) => void open(sample.url, `${sample.title}.glb`.replace(/\s+/g, '_'), true),
-  onClose: () => app.hasModel && welcome.close(),
-});
+let activeLoad: AbortController | null = null;
+let retryOpen: (() => Promise<void>) | null = null;
+const welcome = new WelcomeScreen(
+  {
+    onFile: (file) => void open(file),
+    onSample: (sample) => void open(sample.url, `${sample.title}.glb`.replace(/\s+/g, '_'), true),
+    onClose: () => app.hasModel && welcome.close(),
+    onCancel: () => activeLoad?.abort(new ConversionCancelledError()),
+    onRetry: () => {
+      void retryOpen?.();
+    },
+  },
+  destination,
+);
 
 function closeModel(): void {
   if (welcome.isBusy) return;
@@ -95,20 +115,31 @@ function enterWorkspace(model: LoadedModel): void {
   welcome.close();
 }
 
-function progress(stage: LoadStage | 'convert', fraction: number | null): void {
+function progress(stage: ProgressStage, fraction: number | null): void {
   welcome.setProgress(stage, fraction);
 }
 
-async function convertDrawing(file: File): Promise<LoadedModel> {
+async function convertDrawing(
+  session: ConversionSession,
+  signal: AbortSignal,
+): Promise<LoadedModel> {
   progress('convert', null);
-  const result = await client.convert(file, configYaml?.text ?? null);
-  if (!result.files.glb) {
-    throw new ConversionError('La conversión no generó un GLB único.', 'Convierte sin teselas.');
+  const result = await session.run(client, {
+    signal,
+    onProgress: (phase, fraction) => progress(`convert:${phase}`, fraction),
+  });
+  const converted = convertedModel(result);
+  if (!converted) {
+    throw new ConversionError('La conversión no generó ningún modelo.', 'Revisa el informe.');
   }
-  const base = file.name.replace(/\.(dwg|dxf)$/i, '');
-  const model = await app.load(client.url(result.files.glb), `${base}.glb`, progress);
+  const base = session.file.name.replace(/\.(dwg|dxf)$/i, '');
+  const tiled = converted.kind === 'tiles';
+  const href = client.url(converted.url);
+  const model = await app.load(href, tiled ? base : `${base}.glb`, progress, signal);
   topbar.setDownloads([
-    { label: 'GLB convertido', href: client.url(result.files.glb), filename: `${base}.glb` },
+    tiled
+      ? { label: 'Manifest de teselas', href, filename: `${base}_manifest.json` }
+      : { label: 'GLB convertido', href, filename: `${base}.glb` },
     {
       label: 'Informe de conversión',
       href: client.url(result.files.report_md),
@@ -120,6 +151,7 @@ async function convertDrawing(file: File): Promise<LoadedModel> {
       filename: `${base}.yaml`,
     },
   ]);
+  quality.show(result, (path) => client.url(path));
   const warnings = result.report.warnings.length;
   if (result.config_generated) {
     app.notify(
@@ -132,7 +164,12 @@ async function convertDrawing(file: File): Promise<LoadedModel> {
   return model;
 }
 
-async function open(source: string | File, name?: string, sample = false): Promise<void> {
+async function open(
+  source: string | File,
+  name?: string,
+  sample = false,
+  recovery?: ConversionSession,
+): Promise<void> {
   if (welcome.isBusy) return;
   if (source instanceof File && hasExtension(source.name, CONFIG_EXTENSIONS)) {
     configYaml = { name: source.name, text: await source.text() };
@@ -152,17 +189,40 @@ async function open(source: string | File, name?: string, sample = false): Promi
     return;
   }
   welcome.open(app.hasModel);
-  welcome.startProgress();
+  if (source instanceof File && hasExtension(source.name, DRAWING_EXTENSIONS)) {
+    try {
+      destination.assertUploadAllowed();
+    } catch (error) {
+      welcome.showError(
+        error instanceof ConversionError ? `${error.message} ${error.fix}` : String(error),
+      );
+      return;
+    }
+  }
+  const session =
+    recovery ??
+    (source instanceof File && hasExtension(source.name, DRAWING_EXTENSIONS)
+      ? new ConversionSession(source, configYaml?.text ?? null, tileSize)
+      : null);
+  const controller = new AbortController();
+  activeLoad = controller;
+  const timer = setTimeout(
+    () => controller.abort(new ConversionTimeoutError()),
+    DEFAULT_TIMEOUT_MS,
+  );
+  retryOpen = () => open(source, name, sample, session ?? undefined);
+  welcome.startProgress(session !== null);
   try {
-    const model =
-      source instanceof File && hasExtension(source.name, DRAWING_EXTENSIONS)
-        ? await convertDrawing(source)
-        : await app.load(source, name, progress);
+    const model = session
+      ? await convertDrawing(session, controller.signal)
+      : await app.load(source, name, progress, controller.signal);
     if (!(source instanceof File && hasExtension(source.name, DRAWING_EXTENSIONS)))
       topbar.setDownloads([]);
     enterWorkspace(model);
+    retryOpen = null;
     app.notify(`${model.name} cargado`, 'success');
-  } catch (error) {
+  } catch (caught) {
+    const error: unknown = controller.signal.aborted ? controller.signal.reason : caught;
     if (!(error instanceof ConversionError)) console.error(error);
     const message = error instanceof Error ? error.message : String(error);
     welcome.showError(
@@ -172,7 +232,22 @@ async function open(source: string | File, name?: string, sample = false): Promi
           ? `Ejemplo no encontrado (${typeof source === 'string' ? source : source.name}). Genera los GLB con "just convert-samples" y cópialos a viewer/public/models/.`
           : `No se pudo cargar el modelo: ${message}`,
     );
+    if (session) {
+      if (error instanceof ModelDownloadError && error.status === 404) {
+        session.discardExpiredResult();
+      }
+      // Se conserva el identificador aceptado o el resultado ya generado para recuperarlo.
+      const message = error instanceof Error ? error.message : String(error);
+      const fix =
+        error instanceof ConversionError && !(error instanceof ConversionCancelledError)
+          ? error.fix
+          : '';
+      welcome.showError(`${message} ${fix} ${session.recoveryHint}`);
+    }
+    welcome.setRetry(session?.retryLabel ?? 'Reintentar carga');
   } finally {
+    clearTimeout(timer);
+    activeLoad = null;
     welcome.endProgress();
   }
 }
@@ -214,7 +289,16 @@ window.addEventListener('keydown', (e) => {
   }
   if (!app.hasModel || welcome.visible || app.nav.flying || e.ctrlKey || e.metaKey || e.altKey)
     return;
+  if (e.key === 'Escape' && app.measure.active) {
+    // Primero borra la medición; con nada medido, sale de la herramienta
+    if (app.measure.pointCount) app.measure.clear();
+    else app.setMeasuring(false);
+    return;
+  }
   switch (e.key.toLowerCase()) {
+    case 'm':
+      app.setMeasuring(!app.measure.active);
+      break;
     case 'f':
       app.nav.frame();
       break;

@@ -1,0 +1,14 @@
+{
+  "name": "Extrude",
+  "short_name": "Extrude",
+  "description": "Planos DWG/DXF en 3D, estudio solar y vistas para Blender.",
+  "lang": "es",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#e2e3de",
+  "theme_color": "#476185",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -44,6 +44,10 @@ export class ViewManager {
   render = { width: 1920, height: 1080 };
   showFrame = true;
   private modelKey: string | null = null;
+  /** Cada cambio de modelo invalida las cargas anteriores aún pendientes. */
+  private loadToken = 0;
+  /** Mientras llegan las vistas guardadas no se persiste: pisaría las del almacenamiento. */
+  private loading = false;
   private readonly listeners = new Set<Listener>();
 
   constructor(private readonly app: App) {
@@ -56,7 +60,7 @@ export class ViewManager {
 
   private changed(persist = true): void {
     for (const listener of this.listeners) listener();
-    if (persist && this.modelKey) {
+    if (persist && this.modelKey && !this.loading) {
       saveViews(this.modelKey, this.views).catch((error: unknown) => {
         console.warn(error);
         this.app.notify('No se pudieron guardar las vistas en el navegador: exporta views.json.');
@@ -79,20 +83,31 @@ export class ViewManager {
   }
 
   private async onModel(): Promise<void> {
-    this.modelKey = this.app.model?.name ?? null;
+    const token = ++this.loadToken;
+    const key = this.app.model?.name ?? null;
+    this.modelKey = key;
     this.views = [];
     this.activeId = null;
-    if (this.modelKey) {
-      try {
-        this.views = await loadViews(this.modelKey);
-      } catch (error) {
-        console.warn(error);
-        this.app.notify(
-          'Almacenamiento local no disponible: las vistas no se guardarán al cerrar.',
-        );
-      }
+    this.loading = key !== null;
+    if (!key) {
+      this.changed(false);
+      return;
     }
-    this.changed(false);
+    let stored: SceneView[] = [];
+    try {
+      stored = await loadViews(key);
+    } catch (error) {
+      if (token !== this.loadToken) return;
+      console.warn(error);
+      this.app.notify('Almacenamiento local no disponible: las vistas no se guardarán al cerrar.');
+    }
+    // Si entretanto se abrió otro modelo (o el mismo otra vez), esta carga ya no vale: aplicarla
+    // pondría sus vistas en la lista del modelo nuevo y se guardarían bajo su clave.
+    if (token !== this.loadToken) return;
+    this.loading = false;
+    const createdWhileLoading = this.views; // p. ej. N pulsada antes de que llegaran las guardadas
+    this.views = [...stored, ...createdWhileLoading];
+    this.changed(createdWhileLoading.length > 0);
   }
 
   setRender(width: number, height: number): void {
@@ -214,6 +229,12 @@ export class ViewManager {
   }
 
   exportBlenderScript(): void {
+    if (this.app.model?.tiles) {
+      throw new Error(
+        'La exportación a Blender de modelos teselados aún no está disponible. ' +
+          'Exporta views.json o vuelve a convertir sin teselas para obtener un GLB único.',
+      );
+    }
     const script = generateBlenderScript(
       toBlenderData(this.exportable(), this.requireModel(), GENERATOR),
     );
@@ -224,9 +245,13 @@ export class ViewManager {
   exportGlbWithLights(): string[] {
     const model = this.app.model;
     if (!model) throw new Error('Carga primero un modelo GLB.');
+    if (!model.bytes) {
+      throw new Error('Un modelo teselado no tiene un GLB único: exporta las vistas a views.json.');
+    }
+    const bytes = model.bytes;
     const views = this.exportable();
     const lightsFrom = views.find((v) => v.id === this.activeId) ?? views[0]!;
-    const result = addCamerasAndLights(model.bytes, views, lightsFrom);
+    const result = addCamerasAndLights(bytes, views, lightsFrom);
     const base = model.name.replace(/\.glb$/i, '');
     download(new Blob([result.glb], { type: 'model/gltf-binary' }), `${base}_vistas.glb`);
     return result.skipped;
@@ -235,9 +260,17 @@ export class ViewManager {
   async exportPng(): Promise<void> {
     const { width, height } = this.render;
     const app = this.app;
-    const blob = await renderPng(app.renderer, app.scene, app.nav.camera, width, height, () =>
-      app.prepareFrame(),
-    );
+    // La regla es una ayuda de pantalla (su etiqueta es HTML): no sale en el render
+    const measureVisible = app.measure.group.visible;
+    app.measure.group.visible = false;
+    let blob: Blob;
+    try {
+      blob = await renderPng(app.renderer, app.scene, app.nav.camera, width, height, () =>
+        app.prepareFrame(),
+      );
+    } finally {
+      app.measure.group.visible = measureVisible;
+    }
     const active = this.views.find((v) => v.id === this.activeId);
     download(blob, `${active?.name ?? 'render'}_${width}x${height}.png`);
   }

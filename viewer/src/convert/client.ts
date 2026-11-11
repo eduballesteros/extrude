@@ -1,4 +1,5 @@
 /** Cliente del servidor local de conversión (`extrude serve`). */
+import type { ConversionReport } from './report';
 
 export const DEFAULT_SERVER = 'http://127.0.0.1:8765';
 export const CONFIG_HEADER = 'X-Extrude-Config';
@@ -16,11 +17,108 @@ export interface ConvertResponse {
     report_json: string;
     config: string;
   };
-  report: {
-    warnings: string[];
-    output: { triangles: number; total_size_bytes: number };
-    timings_s: Record<string, number>;
-  };
+  report: ConversionReport;
+}
+
+/**
+ * Fases que publica `extrude serve` (GET /api/jobs/<id>/status) más 'upload' (envío del plano).
+ * El servidor puede añadir fases nuevas: trátese como texto.
+ */
+export type ConvertPhase =
+  | 'upload'
+  | 'queued'
+  | 'draft_config'
+  | 'dwg_to_dxf'
+  | 'read'
+  | 'build'
+  | 'instancing'
+  | 'export'
+  | 'compress'
+  | 'done'
+  | (string & {});
+
+/** `fraction` en [0, 1] del total de la conversión, o null si no se puede estimar. */
+export type ConvertProgress = (phase: ConvertPhase, fraction: number | null) => void;
+
+export const DEFAULT_POLL_MS = 400;
+export const DEFAULT_TIMEOUT_MS = 15 * 60_000;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
+export interface ConvertOptions {
+  /** Tamaño de tesela en metros: el servidor genera tiles/ + manifest.json en vez de un GLB. */
+  tiles?: number;
+  onProgress?: ConvertProgress;
+  /** Intervalo de sondeo del estado (ms). */
+  pollMs?: number;
+  signal?: AbortSignal;
+  /** Límite total de una espera (por defecto 15 minutos). */
+  timeoutMs?: number;
+  /** Límite por petición, incluida la lectura de la respuesta (por defecto 60 s). */
+  requestTimeoutMs?: number;
+  /** Permite retomar el mismo trabajo tras interrumpir la espera, sin reenviar el plano. */
+  onAccepted?: (statusPath: string) => void;
+}
+
+interface AcceptedJob {
+  job: string;
+  state: 'pending';
+  status: string;
+}
+
+interface JobStatus {
+  job: string;
+  state: 'pending' | 'running' | 'done' | 'failed';
+  phase: ConvertPhase;
+  fraction: number;
+  result?: ConvertResponse;
+}
+
+interface ServerError {
+  error?: string;
+  fix?: string;
+}
+
+/** En cola o generando el borrador de YAML no hay avance medible: barra indeterminada. */
+const INDETERMINATE_PHASES = new Set(['queued', 'draft_config']);
+
+function indeterminate(status: JobStatus): boolean {
+  return status.state === 'pending' || INDETERMINATE_PHASES.has(status.phase);
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = (): void => reject(abortError(signal));
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    if (signal.aborted) abort();
+  });
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finish = (): void => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const abort = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      reject(abortError(signal));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
+
+/** Qué abrir tras convertir: un GLB único o un conjunto teselado (manifest.json). */
+export type ConvertedModel = { kind: 'glb'; url: string } | { kind: 'tiles'; url: string };
+
+/** Ruta relativa del servidor del modelo a abrir; null si la respuesta no trae ninguno. */
+export function convertedModel(result: ConvertResponse): ConvertedModel | null {
+  if (result.files.glb) return { kind: 'glb', url: result.files.glb };
+  if (result.files.manifest) return { kind: 'tiles', url: result.files.manifest };
+  return null;
 }
 
 export class ConversionError extends Error {
@@ -30,6 +128,24 @@ export class ConversionError extends Error {
   ) {
     super(message);
   }
+}
+
+export class ConversionCancelledError extends ConversionError {
+  constructor() {
+    super('Espera cancelada.', 'El trabajo puede seguir en el servidor. Puedes retomar la espera.');
+  }
+}
+
+export class ConversionTimeoutError extends ConversionError {
+  constructor() {
+    super('Se agotó el tiempo de espera.', 'Comprueba el servidor y retoma la espera o reintenta.');
+  }
+}
+
+export class ConversionJobEndedError extends ConversionError {}
+
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new ConversionCancelledError();
 }
 
 export function hasExtension(name: string, extensions: string[]): boolean {
@@ -44,7 +160,10 @@ function base64Utf8(text: string): string {
 }
 
 export class ConversionClient {
-  constructor(readonly server: string = DEFAULT_SERVER) {}
+  constructor(
+    readonly server: string = DEFAULT_SERVER,
+    private readonly authorizeUpload?: () => void,
+  ) {}
 
   url(path: string): string {
     return new URL(path, this.server).toString();
@@ -57,7 +176,102 @@ export class ConversionClient {
     );
   }
 
-  async convert(file: File, configYaml: string | null): Promise<ConvertResponse> {
+  async convert(
+    file: File,
+    configYaml: string | null,
+    options: ConvertOptions = {},
+  ): Promise<ConvertResponse> {
+    this.authorizeUpload?.();
+    return this.withDeadline(options, (signal) => this.upload(file, configYaml, options, signal));
+  }
+
+  /** Consulta el trabajo ya aceptado: nunca vuelve a subir el archivo. */
+  async resume(statusPath: string, options: ConvertOptions = {}): Promise<ConvertResponse> {
+    return this.withDeadline(options, (signal) => this.waitFor(statusPath, options, signal));
+  }
+
+  private async withDeadline(
+    options: ConvertOptions,
+    run: (signal: AbortSignal) => Promise<ConvertResponse>,
+  ): Promise<ConvertResponse> {
+    for (const value of [
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    ]) {
+      if (!Number.isFinite(value) || value <= 0 || value > 2_147_483_647) {
+        throw new ConversionError('Tiempo de espera no válido.', 'Indica un tiempo finito > 0.');
+      }
+    }
+    if (
+      !Number.isFinite(options.pollMs ?? DEFAULT_POLL_MS) ||
+      (options.pollMs ?? DEFAULT_POLL_MS) < 0
+    ) {
+      throw new ConversionError(
+        'Intervalo de sondeo no válido.',
+        'Indica un intervalo finito ≥ 0.',
+      );
+    }
+    const controller = new AbortController();
+    const cancel = (): void =>
+      controller.abort(
+        options.signal?.reason instanceof ConversionError
+          ? options.signal.reason
+          : new ConversionCancelledError(),
+      );
+    options.signal?.addEventListener('abort', cancel, { once: true });
+    if (options.signal?.aborted) cancel();
+    const timer = setTimeout(
+      () => controller.abort(new ConversionTimeoutError()),
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    );
+    try {
+      controller.signal.throwIfAborted();
+      return await abortable(run(controller.signal), controller.signal);
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', cancel);
+    }
+  }
+
+  private async request(
+    path: string,
+    init: RequestInit,
+    signal: AbortSignal,
+    options: ConvertOptions,
+  ): Promise<{ response: Response; payload: unknown }> {
+    signal.throwIfAborted();
+    const controller = new AbortController();
+    const cancel = (): void => controller.abort(signal.reason);
+    signal.addEventListener('abort', cancel, { once: true });
+    const timer = setTimeout(
+      () => controller.abort(new ConversionTimeoutError()),
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    );
+    try {
+      return await abortable(
+        (async () => {
+          const response = await fetch(this.url(path), { ...init, signal: controller.signal });
+          const payload: unknown = await response.json().catch(() => ({}));
+          return { response, payload };
+        })(),
+        controller.signal,
+      );
+    } catch (error) {
+      if (controller.signal.aborted) throw controller.signal.reason;
+      if (error instanceof ConversionError) throw error;
+      throw this.unreachable();
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', cancel);
+    }
+  }
+
+  private async upload(
+    file: File,
+    configYaml: string | null,
+    options: ConvertOptions,
+    signal: AbortSignal,
+  ): Promise<ConvertResponse> {
     if (!hasExtension(file.name, DRAWING_EXTENSIONS)) {
       throw new ConversionError(
         `'${file.name}' no es un plano.`,
@@ -66,23 +280,80 @@ export class ConversionClient {
     }
     const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
     if (configYaml) headers[CONFIG_HEADER] = base64Utf8(configYaml);
-    let response: Response;
-    try {
-      response = await fetch(this.url(`/api/convert?name=${encodeURIComponent(file.name)}`), {
+    let query = `name=${encodeURIComponent(file.name)}`;
+    if (options.tiles !== undefined) {
+      if (!Number.isFinite(options.tiles) || !(options.tiles > 0)) {
+        throw new ConversionError('Tamaño de tesela no válido.', 'Indica un tamaño > 0 m.');
+      }
+      query += `&tiles=${encodeURIComponent(String(options.tiles))}`;
+    }
+    // async=1: el servidor responde 202 al instante y se sondea el estado por fases. Un
+    // servidor anterior ignora el parámetro y responde 200 con el resultado (también vale).
+    query += '&async=1';
+    options.onProgress?.('upload', null);
+    const { response, payload: raw } = await this.request(
+      `/api/convert?${query}`,
+      {
         method: 'POST',
         headers,
         body: file,
-      });
-    } catch {
-      throw this.unreachable();
-    }
-    const payload = (await response.json().catch(() => ({}))) as Partial<ConvertResponse> & {
-      error?: string;
-      fix?: string;
-    };
+      },
+      signal,
+      options,
+    );
+    const payload = (raw ?? {}) as Partial<ConvertResponse> & Partial<AcceptedJob> & ServerError;
     if (!response.ok) {
       throw new ConversionError(payload.error ?? `HTTP ${response.status}`, payload.fix ?? '');
     }
+    if (response.status === 202 && payload.status) {
+      options.onAccepted?.(payload.status);
+      return this.waitFor(payload.status, options, signal);
+    }
+    if (response.status === 202)
+      throw new ConversionError(
+        'Respuesta de conversión incompleta.',
+        'Actualiza extrude serve y reintenta.',
+      );
     return payload as ConvertResponse;
+  }
+
+  /** Sondea GET /api/jobs/<id>/status hasta que el trabajo termina o falla. */
+  private async waitFor(
+    statusPath: string,
+    options: ConvertOptions,
+    signal: AbortSignal,
+  ): Promise<ConvertResponse> {
+    const interval = options.pollMs ?? DEFAULT_POLL_MS;
+    let lastPhase = '';
+    let lastFraction = -1;
+    for (;;) {
+      const { response, payload } = await this.request(statusPath, {}, signal, options);
+      const status = (payload ?? {}) as JobStatus & ServerError;
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new ConversionJobEndedError(
+            'El trabajo ya no está disponible.',
+            'Reenvía el plano para convertirlo de nuevo.',
+          );
+        }
+        throw new ConversionError(status.error ?? `HTTP ${response.status}`, status.fix ?? '');
+      }
+      if (status.state === 'done' && status.result) return status.result;
+      if (status.state === 'failed') {
+        throw new ConversionJobEndedError(status.error ?? 'La conversión falló.', status.fix ?? '');
+      }
+      if (status.state !== 'pending' && status.state !== 'running') {
+        throw new ConversionError(
+          'El servidor devolvió un estado incompleto.',
+          'Comprueba extrude serve y retoma la espera.',
+        );
+      }
+      if (status.phase !== lastPhase || status.fraction !== lastFraction) {
+        lastPhase = status.phase;
+        lastFraction = status.fraction;
+        options.onProgress?.(status.phase, indeterminate(status) ? null : status.fraction);
+      }
+      await sleep(interval, signal);
+    }
   }
 }

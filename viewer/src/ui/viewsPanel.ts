@@ -72,10 +72,14 @@ export class ViewsPanel {
       onClick: () => this.guard(() => views.create()),
     });
 
+    // Primero lo que se usa a diario (las vistas); el formato de render, abajo
     this.element.append(
+      h('div', { class: 'list-header' }, h('span', { textContent: 'Vistas guardadas' }), add),
+      this.list,
       h(
         'div',
-        { class: 'panel-group' },
+        { class: 'panel-group render-settings' },
+        h('div', { class: 'group-title', textContent: 'Render' }),
         h(
           'div',
           { class: 'field' },
@@ -97,8 +101,6 @@ export class ViewsPanel {
         ),
         this.frameToggle.element,
       ),
-      h('div', { class: 'list-header' }, h('span', { textContent: 'Vistas guardadas' }), add),
-      this.list,
     );
     views.on(() => this.render());
     this.render();
