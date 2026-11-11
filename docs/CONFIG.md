@@ -24,7 +24,7 @@ ignore) y la fuente de altura de los edificios con este orden:
 3. Si los edificios son bloques (INSERT) → `height_from: block` con un `block_values` provisional
    por tipo de bloque (a ajustar).
 4. Polilíneas con cota Z → `height_from: elevation`; si la altura sale de otra fuente y hay cota,
-   `base_from_elevation: true`.
+   se propone `base_from_terrain: true` cuando hay terreno, o `base_from_elevation: true` si no lo hay.
 5. Si no encuentra nada → solo `default_height: 9.0`.
 
 Solo cuenta los textos que caen **dentro** de las plantas (no leyendas ni títulos), y un número
@@ -33,6 +33,11 @@ volúmenes de 6 m y las capas de "terreno" sin cotas Z se ignoran (no sirven par
 
 Cada regla generada lleva comentarios con la evidencia (ejemplos de textos, atributos vistos). Es
 un **borrador**: revísalo siempre.
+
+Cuando hay terreno y la altura del edificio sale de textos, atributos o bloques, el borrador apoya
+su base en el TIN aunque algunas plantas tengan Z. Una sola polilínea acotada no garantiza que
+toda la capa tenga cotas de base fiables. Para usar cotas de base verificadas, sustituye
+`base_from_terrain: true` por `base_from_elevation: true` en esa regla.
 
 ## Estructura
 
@@ -54,6 +59,7 @@ layers:              # lista ordenada: gana la PRIMERA regla cuyo patrón encaje
 |---|---|---|---|
 | `units` | `auto`/`mm`/`cm`/`m`/`km`/`in`/`ft` | `auto` | Unidades del dibujo. `auto` usa `$INSUNITS`; si falta, asume metros y avisa. La salida siempre va en metros. |
 | `recenter` | bool | `true` | Resta el centro de la escena al exportar y guarda el desplazamiento en `scene.extras.origin_offset`. |
+| `crs` | str | — | Sistema de coordenadas del dibujo, p. ej. `"EPSG:25830"` (ETRS89 / UTM 30N). No reproyecta la geometría: se guarda en `scene.extras` y, si es un EPSG UTM (o hay `pyproj` instalado), se calcula la latitud/longitud del centro para situar el sol del visor. |
 | `tolerance` | float > 0 (m) | `0.01` | Cierre de polilíneas casi cerradas, unión de extremos de LINE/ARC, detección de duplicados, área mínima (tolerancia²) y aplanado de curvas. |
 | `layers` | lista de reglas | `[]` | Ver abajo. Capas sin regla no se convierten y se listan en el informe. |
 
@@ -68,6 +74,7 @@ layers:              # lista ordenada: gana la PRIMERA regla cuyo patrón encaje
 | `attribute` | str | — | Etiqueta del ATTRIB (obligatoria con `height_from: attribute`). Sin distinguir mayúsculas. |
 | `text_regex` | regex | `(\d+)\s*P` | Con `height_from: text`. El **grupo 1** es el número. Admite decimales con coma y números romanos. Escríbelo entre comillas simples en el YAML. |
 | `text_layers` | lista de globs | todas | Capas donde buscar los textos. Recomendado acotarlo para no confundir rótulos. |
+| `text_tolerance` | float ≥ 0 (m) | `1.0` | Si dentro del polígono no hay ningún texto (o ATTRIB) válido, se acepta uno situado fuera del contorno a esta distancia como máximo. `0` lo desactiva. Ver abajo. |
 | `value_means` | `floors`/`meters` | `floors` | Si el número (texto o atributo) son plantas o metros. |
 | `floor_offset` | int | `0` | Plantas a sumar al número leído. Ej.: `B+3` con `floor_offset: 1` → 4 plantas. |
 | `floors` | int ≥ 0 | — | Nº de plantas fijo para la capa (prioridad 2). |
@@ -76,6 +83,8 @@ layers:              # lista ordenada: gana la PRIMERA regla cuyo patrón encaje
 | `default_height` | float ≥ 0 (m) | — | Último recurso (prioridad 4). |
 | `base_elevation` | float (m) | `0.0` | Cota de la base de la extrusión. Con `height_from: elevation`, altura = Z − base. |
 | `base_from_elevation` | bool | `false` | La base de cada polígono es su propia cota Z (+ `base_elevation`). Útil cuando las plantas están dibujadas a la cota del terreno. |
+| `base_from_terrain` | bool | `false` | Apoya la capa en el terreno (TIN de las capas `kind: terrain`), sumando `base_elevation`. Edificios: usa `terrain_support`. Viales, agua y vegetación: la superficie se adapta a la pendiente. Bloques (árboles…) en terreno casi llano (desnivel ≤ 1 m): base plana, siguen siendo instancias. Excluyente con `base_from_elevation`. `init-config` lo activa cuando hay terreno en las capas sin cota y en edificios cuya altura viene de textos, atributos o bloques, aunque tengan Z. |
+| `terrain_support` | `foundation` / `minimum` | `foundation` | Para edificios con `base_from_terrain`: `foundation` sitúa la planta en la cota máxima bajo la huella y añade un zócalo hasta el terreno. La cubierta queda horizontal a planta + altura, sin incrementar las plantas asignadas. `minimum` conserva el criterio antiguo: prisma con base en la cota mínima, que puede quedar enterrado en laderas. No afecta a bases explícitas ni al resto de kinds. |
 | `detect_holes` | bool | `true` | Un contorno dentro de otro de la misma capa es un patio (par/impar). Desactívalo si en la capa hay volúmenes contenidos en otros (p. ej. torre sobre podio dibujados en la misma capa). Los HATCH siempre usan par/impar. |
 | `bottom_cap` | bool | `false` | Generar la cara inferior (solo si el modelo se verá desde abajo; ahorra triángulos). |
 | `material` | objeto | según `kind` | `color` (`#rrggbb`), `roughness` y `metalness` (0–1), `opacity` (0–1). |
@@ -83,15 +92,45 @@ layers:              # lista ordenada: gana la PRIMERA regla cuyo patrón encaje
 
 ### Prioridad de la altura
 
+`height: 0` (o una altura resuelta de cero) representa una superficie sin volumen.
+Con `base_from_terrain: true`, también en capas `building`, esa superficie sigue el TIN
+con el desplazamiento `base_elevation`, sin generar zócalo ni una cubierta elevada.
+Sin apoyo en terreno, permanece en la cota de base indicada. `bottom_cap` no añade una
+segunda tapa a estas superficies de espesor cero.
+
+Si una regla usa `base_from_elevation` o `height_from: elevation`, los contornos se procesan
+por cota antes de reconstruir líneas, detectar patios y eliminar duplicados. Dos huellas XY
+iguales en cotas distintas conservan sus volúmenes; una polilínea y su HATCH en la misma cota
+siguen deduplicándose. La cota media se convierte a metros y se agrupa con la precisión de
+`tolerance`, como la geometría XY. Los patios se detectan dentro de cada nivel.
+
+El diagnóstico de terreno registra la cobertura de todos los objetos comprobados en
+`ground_details` y agrega `terrain_coverage` por capa. Una huella que salga total o
+parcialmente del TIN genera un aviso de extrapolación, aunque sus cotas parezcan correctas:
+fuera del TIN se usa el punto de terreno más cercano, no topografía medida bajo la huella.
+
+El zócalo automático es una aproximación geométrica, no un cálculo estructural ni una
+plataforma de proyecto. No modifica las curvas ni el terreno. Su altura máxima y la cota
+de la planta se incluyen en el informe; el GLB exporta `foundation_height` y usa `base`
+para la cota de planta (sin sumar el zócalo a `height` o `floors`). Las huellas con zócalos
+distintos se exportan como geometría propia, sin compartir una instancia incompatible.
+En pendientes fuertes, revisa las alturas supuestas y las cotas reales del proyecto.
+
 Para cada polígono: `height_from` (si encuentra valor) → `floors × floor_height` → `height` →
 `default_height`. Si no hay ninguna:
 
 - `building`: el polígono **se descarta** y aparece en el informe como "sin altura".
-- `road`, `water`, `vegetation`: superficie plana a `base_elevation`.
+- `road`, `water`, `vegetation`: superficie plana a `base_elevation` (o sobre el terreno con `base_from_terrain`).
 
 Con `height_from: text`, si dentro del polígono hay varios textos válidos se usa el más cercano a
 su punto representativo y el caso se cuenta como "ambiguo" en el informe. Un texto dentro de un
 patio no cuenta para el edificio que lo rodea.
+
+Si no hay ningún texto válido dentro, se buscan textos **justo fuera** del contorno, a menos de
+`text_tolerance` (los puntos de inserción suelen quedar unos centímetros fuera de la fachada). Se
+usa el más cercano al borde, y solo si no está dentro de otro polígono de la capa ni más cerca (o
+igual de cerca) de otro: así no se roba el rótulo del edificio de al lado en una medianera. El
+informe cuenta estas alturas para que puedas revisarlas.
 
 Con `height_from: attribute` se usan primero los atributos del propio bloque que contiene la
 geometría; si la geometría no es un bloque, se buscan bloques-etiqueta (ATTRIB) dentro del polígono.

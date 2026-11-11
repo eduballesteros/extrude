@@ -14,9 +14,10 @@
                                                          views.json · blender_setup.py · GLB+luces · PNG
 ```
 
-## Suposiciones (Fase 0, sin respuesta a las preguntas iniciales)
+## Alcance y convenciones
 
-Se revisarán cuando llegue el DWG real.
+Estas convenciones describen el pipeline. Las alturas, la clasificación de capas y las
+cotas válidas dependen de la configuración de cada proyecto.
 
 | Tema | Suposición |
 |---|---|
@@ -25,7 +26,7 @@ Se revisarán cuando llegue el DWG real.
 | Escala | Barrio (miles de edificios); se diseña para ciudad (~50 000 edificios) con fusión por capa e instancing. |
 | Alturas | Dependen de cada proyecto: se configuran por capa en YAML (`init-config` propone un borrador). |
 | Destino de render | Blender (prioritario). Otros motores vía glTF, marcados como "no verificado". |
-| Conversor DWG | No instalado en el entorno de desarrollo: se trabaja con DXF; ODA/LibreDWG solo se prueban con dobles (mocks). |
+| Conversor DWG | DXF se lee directamente; DWG requiere ODA o LibreDWG. Las pruebas automáticas de adaptadores usan dobles y la disponibilidad real se consulta con `extrude doctor`. |
 | Python | `requires-python >= 3.12`; desarrollado y probado con 3.13.2. |
 | Tareas | `just` en lugar de `make` (no hay `make` nativo en Windows; `just` funciona igual en Linux/macOS). |
 

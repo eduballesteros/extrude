@@ -29,7 +29,8 @@ glTF 2.0 binario, generado sin librerías externas (`pipeline/src/extrude/gltf_e
 | `origin_offset` | `[x, y, z]` en metros y **ejes DWG** (Z-up) |
 | `units` | `"m"` |
 | `source_units` | unidades del dibujo de origen (`mm`, `m`…) |
-| `crs` | lo indicado en `crs` del YAML (p. ej. `"EPSG:25830"`) o `null`. No se reproyecta nada. |
+| `crs` | lo indicado en `crs` del YAML (p. ej. `"EPSG:25830"`) o `null`. La geometría no se reproyecta. |
+| `center_lat`, `center_lon` | centro del bbox de la escena en WGS84 (grados) o `null`. Se calcula si `crs` es un EPSG UTM (WGS 84 326xx/327xx, ETRS89 258xx, NAD83 269xx) o, con `pyproj` instalado, cualquier CRS proyectado. El visor sitúa ahí el sol al cargar el modelo. |
 | `axis_transform` | `"(x, y, z)_dwg -> (x, z, -y)_gltf"` |
 | `bbox` | `{min, max}` en coordenadas glTF (ya recentradas) |
 | `generator` | versión de Extrude |
@@ -46,7 +47,8 @@ glTF 2.0 binario, generado sin librerías externas (`pipeline/src/extrude/gltf_e
   | `layer`, `kind`, `visible` | de la regla del YAML |
   | `source_entities` | `{tipo DXF: nº}` leídos en la capa |
   | `triangle_count` | triángulos de la capa, instancias incluidas |
-  | `objects` | arrays paralelos por objeto: `height`, `height_origin`, `source_type`, `handle` |
+  | `ground_check` | Si hay TIN: `checked`, `floating` (base sobre todo el terreno), `buried` (cubierta bajo todo el terreno), `intersecting` (el terreno entra entre base y cubierta) y `partially_buried` (supera la cubierta solo en parte de la huella). Categorías excluyentes, con tolerancia de 1 m. Las intersecciones con ladera son informativas y no recomiendan reasentar automáticamente. También disponible por capa en `report.json`. |
+  | `objects` | arrays paralelos por objeto: `height`, `floors`, `base`, `foundation_height`, `height_origin`, `source_type`, `handle`. En edificios adaptados al terreno, `base` es la cota de planta horizontal y `foundation_height` el desnivel máximo del zócalo bajo ella; no se suma a `height` ni a `floors`. Los handles de bloques con zócalo corresponden al INSERT original. |
 
 - **Identificador de objeto:** el atributo de vértice `_OBJECT_ID` (float; redondéalo) es el
   índice en `extras.objects`. Permite seleccionar un edificio concreto dentro de la malla
@@ -76,6 +78,8 @@ teselas comparten el mismo `origin_offset`, así que se cargan juntas sin despla
   "origin_offset": [x, y, z],
   "units": "m",
   "crs": null,
+  "center_lat": null,
+  "center_lon": null,
   "tile_size": 500,
   "tiles": [{"id": "0_0", "file": "tiles/tile_0_0.glb", "bbox": {"min": [], "max": []},
              "triangles": 0, "size_bytes": 0}]
@@ -151,6 +155,10 @@ o compartirlas, exporta `views.json`.
   cargado, se avisa.
 
 ## `blender_setup.py`
+
+Disponible para modelos de un solo GLB. En modelos teselados el visor bloquea esta exportación:
+exporta `views.json` o convierte sin `--tiles` para generar el script de Blender.
+
 
 Script autocontenido (los datos de las vistas van en Base64 dentro del propio script).
 

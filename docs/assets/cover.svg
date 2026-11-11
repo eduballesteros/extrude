@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">Extrude — De plano a modelo 3D</title>
+  <desc id="desc">Planos DWG y DXF, modelos GLB, estudio solar y vistas para Blender.</desc>
+  <defs>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#476185" stroke-opacity=".1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="400" rx="24" fill="#e2e3de"/>
+  <rect x="680" width="520" height="400" fill="url(#grid)"/>
+  <rect x="58" y="54" width="72" height="72" rx="16" fill="#fff"/>
+  <g transform="translate(62 58)" fill="none" stroke="#07112c" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M32 15 41.5 20.48V43.52L32 49 22.5 43.52V20.48Z"/>
+    <path d="m22.5 20.48 9.5 5.49 9.5-5.49M32 25.97V49"/>
+  </g>
+  <text x="150" y="106" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="700" fill="#07112c">Extrude</text>
+  <text x="58" y="206" font-family="Arial, Helvetica, sans-serif" font-size="43" font-weight="700" fill="#07112c">De plano a modelo 3D.</text>
+  <text x="60" y="252" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#476185">DWG / DXF · Terreno · Estudio solar · Blender</text>
+  <rect x="58" y="302" width="172" height="36" rx="18" fill="#07112c"/>
+  <text x="144" y="326" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" fill="#fff">PYTHON + THREE.JS</text>
+  <g stroke="#476185" stroke-width="2" stroke-linejoin="round">
+    <path d="m786 268 124-65 164 83-126 66Z" fill="#c8d1d9"/>
+    <path d="m806 236 42-23 43 23-42 23Z" fill="#f3f3f1"/>
+    <path d="m806 236 43 23v41l-43-22Z" fill="#8fa0b8"/>
+    <path d="m849 259 42-23v41l-42 23Z" fill="#476185"/>
+    <path d="m904 152 50-26 51 26-51 27Z" fill="#fff"/>
+    <path d="m904 152 50 27v110l-50-25Z" fill="#8fa0b8"/>
+    <path d="m954 179 51-27v112l-51 25Z" fill="#476185"/>
+    <path d="m1011 234 39-20 39 20-39 21Z" fill="#f3f3f1"/>
+    <path d="m1011 234 39 21v46l-39-20Z" fill="#8fa0b8"/>
+    <path d="m1050 255 39-21v47l-39 20Z" fill="#476185"/>
+  </g>
+  <circle cx="1068" cy="92" r="26" fill="#e29578"/>
+  <path d="m752 312 19-10m-14 24 20-10" stroke="#476185" stroke-width="2" stroke-linecap="round"/>
+</svg>

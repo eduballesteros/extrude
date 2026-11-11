@@ -66,8 +66,9 @@ samples:
     uv run python tests/sample_dxf.py ../samples
 
 # Inspecciona un DWG/DXF (ruta relativa a la raíz del repo)
+[working-directory: 'pipeline']
 inspect file:
-    cd pipeline; uv run extrude inspect ../{{file}}
+    uv run extrude inspect {{ if os_family() == "windows" { "'" + replace("../" + file, "'", "''") + "'" } else { quote("../" + file) } }}
 
 # Convierte las muestras con sus configs (samples/config) a out/<muestra>/
 [working-directory: 'pipeline']
@@ -97,6 +98,10 @@ serve:
 [working-directory: 'viewer']
 dev:
     npm run dev
+
+# Regenera logo, favicon SVG/ICO y PNG desde una única geometría
+icons:
+    uv run --no-project --with pillow==11.3.0 python viewer/scripts/make-icons.py
 
 # Todo lo que debe pasar antes de un commit
 check: lint test
