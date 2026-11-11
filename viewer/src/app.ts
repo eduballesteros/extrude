@@ -30,6 +30,7 @@ import {
 import { boundsOf, Navigation, type ViewPreset } from './scene/navigation';
 import { describeHit, firstVisibleHit } from './scene/picking';
 import { composeIso, geolocate, splitIso } from './scene/sun';
+import { sharpenTextures } from './scene/textures';
 import { defaultState, type LightType, type Vec3, type ViewerState } from './state';
 import { InfoPanel } from './ui/info';
 import { StatsOverlay } from './ui/stats';
@@ -257,6 +258,7 @@ export class App {
         mesh.receiveShadow = true;
       }
     });
+    sharpenTextures(model.root, this.renderer.capabilities.getMaxAnisotropy());
     this.scene.add(model.root);
     this.sceneBox = boundsOf(model.root);
     this.nav.setSceneBox(this.sceneBox);

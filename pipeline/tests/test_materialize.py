@@ -390,3 +390,21 @@ def test_materialized_glb_passes_validator(tmp_path: Path) -> None:
     (report,) = validate([path])
     assert report["errors"] == 0, report["messages"]
     assert report["warnings"] == 0, report["messages"]
+
+
+def test_color_compensation_keeps_the_hue(tmp_path: Path) -> None:
+    """La compensación de la textura escala los tres canales por igual: el ladrillo claro sigue
+    siendo beige (R > G > B, mismas proporciones), no blanco saturado."""
+    from extrude.gltf_export import srgb_to_linear
+
+    out = build(tmp_path, "a", drawing())
+    ids = [o["id"] for o in objects(out, "E")]
+    data, _ = materialize(
+        (out / "model.glb").read_bytes(),
+        plan_for(out, assign(ids, "facade_exterior", "brick_light")),
+    )
+    material = next(m for m in _Glb(data).doc["materials"] if m["name"] == "Ladrillo claro")
+    factor = material["pbrMetallicRoughness"]["baseColorFactor"][:3]
+    expected = srgb_to_linear("#d8c3a5")
+    assert max(factor) <= 1
+    assert np.allclose(np.array(factor) / factor[0], np.array(expected) / expected[0])

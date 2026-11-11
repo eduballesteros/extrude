@@ -71,10 +71,10 @@ def brick(rng: np.random.Generator, size: int) -> Image:
     row = np.floor(v * courses).astype(int)
     shifted = u + (row % 2) * 0.5 / per_row
     column = np.floor(shifted * per_row).astype(int) % per_row
-    tint = rng.uniform(0.82, 1.0, (courses, per_row))[row % courses, column]
-    face = tint * (0.92 + 0.08 * _fbm(size, rng, 16, 3))
+    tint = rng.uniform(0.62, 0.92, (courses, per_row))[row % courses, column]
+    face = tint * (0.88 + 0.12 * _fbm(size, rng, 16, 3))
     mortar = np.maximum(_joints(v, courses, 0.09), _joints(shifted, per_row, 0.025))
-    return np.where(mortar > 0, 0.97, face)
+    return np.where(mortar > 0, 1.0, face)
 
 
 def concrete(rng: np.random.Generator, size: int) -> Image:

@@ -216,8 +216,10 @@ class _Materializer:
         pbr: dict[str, Any] = {"metallicFactor": preset.metalness, "roughnessFactor": roughness}
         if preset.pattern:
             _, mean = texture(preset.pattern)
-            # La textura es luminancia: se compensa su media para conservar el tono del color
-            linear = [min(1.0, c / mean) for c in linear]
+            # La textura es luminancia: se compensa su media para conservar el color medio, con
+            # el mismo factor en los tres canales (recortar canal a canal cambiaría el tono)
+            gain = min(1 / mean, 1 / max(max(linear), 1e-6))
+            linear = [c * gain for c in linear]
             pbr["baseColorTexture"] = {"index": self.texture_index(preset.pattern)}
         pbr["baseColorFactor"] = [*linear, preset.opacity]
         material: dict[str, Any] = {

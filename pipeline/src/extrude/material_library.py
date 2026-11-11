@@ -109,7 +109,7 @@ PRESETS: tuple[MaterialPreset, ...] = (
         "Grava de cubierta",
         "cubierta",
         "Cubierta plana acabada en grava",
-        "#9d9a92",
+        "#86837b",
         1.0,
         tile_size_m=(2.0, 2.0),
         pattern="gravel",
