@@ -138,6 +138,7 @@ describe('barra superior, vistas e inspección', () => {
       point: new Vector3(),
       layer: 'EDIFICIOS',
       kind: 'building',
+      objectId: null,
       fields: [
         ['Objeto', '3'],
         ['Altura (m)', '18'],

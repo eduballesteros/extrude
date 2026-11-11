@@ -2,10 +2,11 @@
 
 **Producto:** Extrude  
 **Versión del documento:** 1.0 · 11 de noviembre de 2026  
-**Estado:** Fases 0 y 1 implementadas: IDs persistentes, superficies semánticas, `objects.json`,
-esquema y validación de `materials.json`, UV en metros, biblioteca de 12 presets con texturas
-procedurales y `extrude materialize` (GLB autocontenido, instancias independientes). Fases 2–5
-pendientes (panel de revisión en el visor, IA, exportaciones coherentes, endurecimiento).  
+**Estado:** Fases 0, 1 y 2 implementadas: IDs persistentes, superficies semánticas,
+`objects.json`, esquema y validación de `materials.json`, UV en metros, biblioteca de 12 presets
+con texturas procedurales, `extrude materialize` y pestaña Materiales del visor (asignación
+manual, previsualizar, descartar, deshacer, confirmar revisiones). Fases 3–5 pendientes
+(interpretación del prompt con IA, exportaciones coherentes, endurecimiento).  
 **Entrega propuesta:** primera versión con biblioteca PBR controlada, revisión de asignaciones y GLB autocontenido.
 
 ## 1. Objetivo y resultado esperado

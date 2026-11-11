@@ -81,6 +81,12 @@ cotas válidas dependen de la configuración de cada proyecto.
   mismo. Los prototipos instanciados guardan UV en metros locales y las copias se reagrupan por
   material y escala. Texturas procedurales propias (sin licencias de terceros) y en escala de
   grises: el color es el factor del material.
+- **Materiales en el visor** (`viewer/src/materials`, `ui/materialsPanel.ts`,
+  `materials_service.py`): el visor no materializa por su cuenta. Edita un borrador de plan y lo
+  envía a `extrude serve`, que lo valida y aplica con el mismo código que la CLI; previsualizar
+  y confirmar recargan el GLB del servidor conservando cámara, sol y capas. El catálogo de objetos
+  se lee del propio GLB (`_OBJECT_ID`, `_SURFACE`, `extras`). Confirmar crea una revisión
+  inmutable (`materials/mat-00N.json`) numerada por el servidor.
 - **Herramientas Node** (`tools/`): validador de Khronos y `gltf-transform` se ejecutan con `node`
   directamente (nunca con `npx.cmd` ni shell), con rutas generadas por Extrude.
 - **Visor**: el estado (`viewer/src/state.ts`) es un objeto JSON plano. Los módulos de escena lo

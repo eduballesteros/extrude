@@ -6,6 +6,30 @@ export interface PickInfo {
   layer: string | null;
   kind: string | null;
   fields: [string, string][];
+  /** Identidad persistente del objeto pulsado (objects.json), si el GLB la tiene. */
+  objectId: string | null;
+}
+
+/** ID persistente del objeto bajo el punto: tabla de la capa o `object_ids` de la instancia. */
+export function objectIdOfHit(hit: Intersection): string | null {
+  const blockNode = findAncestor(hit.object, 'block');
+  if (blockNode && hit.instanceId !== undefined) {
+    const all = blockNode.userData['object_ids'] as unknown;
+    const ids = Array.isArray(all) ? (all[hit.instanceId] as unknown) : undefined;
+    if (!Array.isArray(ids) || !ids.length) return null;
+    const parts = (hit.object as { geometry?: { attributes: Record<string, BufferAttribute> } })
+      .geometry?.attributes['_object_id'];
+    const part = parts && hit.face ? Math.round(parts.getX(hit.face.a)) : 0;
+    const id: unknown = ids[part] ?? ids[0];
+    return typeof id === 'string' ? id : null;
+  }
+  const layerNode = findAncestor(hit.object, 'layer');
+  const table = layerNode?.userData['objects'] as ObjectTable | undefined;
+  const index = (hit.object as { geometry?: { attributes: Record<string, BufferAttribute> } })
+    .geometry?.attributes['_object_id'];
+  if (!table?.['id'] || !index || !hit.face) return null;
+  const id = table['id'][Math.round(index.getX(hit.face.a))];
+  return typeof id === 'string' ? id : null;
 }
 
 type ObjectTable = Record<string, unknown[]>;
@@ -101,6 +125,7 @@ export function describeHit(hit: Intersection): PickInfo {
     layer: typeof extras['layer'] === 'string' ? extras['layer'] : null,
     kind: typeof extras['kind'] === 'string' ? extras['kind'] : null,
     fields,
+    objectId: objectIdOfHit(hit),
   };
 }
 

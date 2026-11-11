@@ -16,6 +16,7 @@ import { ConversionDestination } from './convert/destination';
 import { type LoadedModel, ModelDownloadError } from './scene/loader';
 import { FrameOverlay } from './ui/frameOverlay';
 import { Inspector } from './ui/inspector';
+import { MaterialsPanel } from './ui/materialsPanel';
 import { LayersPanel } from './ui/layersPanel';
 import { QualitySummary } from './ui/qualitySummary';
 import { Sidebar } from './ui/sidebar';
@@ -56,13 +57,19 @@ const topbar = new TopBar(app, views, {
 });
 const viewsPanel = new ViewsPanel(app, views, frame);
 const layersPanel = new LayersPanel(app);
+const materialsPanel = new MaterialsPanel(app, {
+  server: destination.server,
+  authorizeUpload: () => destination.assertUploadAllowed(),
+});
 const left = new Sidebar('left', [
   { id: 'views', label: 'Vistas', panel: viewsPanel.element },
   { id: 'layers', label: 'Capas', panel: layersPanel.element },
+  { id: 'materials', label: 'Materiales', panel: materialsPanel.element },
 ]);
 const syncCounts = (): void => {
   left.setCount('views', viewsPanel.count);
   left.setCount('layers', layersPanel.count);
+  left.setCount('materials', materialsPanel.count);
 };
 views.on(syncCounts);
 app.on('model', syncCounts);
@@ -136,6 +143,7 @@ async function convertDrawing(
   const tiled = converted.kind === 'tiles';
   const href = client.url(converted.url);
   const model = await app.load(href, tiled ? base : `${base}.glb`, progress, signal);
+  if (!tiled) materialsPanel.setJob(result.job, converted.url);
   topbar.setDownloads([
     tiled
       ? { label: 'Manifest de teselas', href, filename: `${base}_manifest.json` }

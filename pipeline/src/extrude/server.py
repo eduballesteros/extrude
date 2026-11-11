@@ -9,8 +9,16 @@ Solo librería estándar. Pensado para uso local (escucha en 127.0.0.1 por defec
                                          sigue en segundo plano
   GET  /api/jobs/<id>/status           → {state, phase, fraction, result | error, fix}
   GET  /api/jobs/<id>/<archivo>        → model.glb, report.md, report.json, config.yaml,
-                                         objects.json (catálogo de objetos), manifest.json y
-                                         tiles/tile_<i>_<j>.glb (con tiles=)
+                                         objects.json (catálogo de objetos), manifest.json,
+                                         tiles/tile_<i>_<j>.glb (con tiles=), materials.json,
+                                         model.preview.glb y model.materialized.glb
+  GET  /api/library                    → biblioteca de materiales (IDs, versiones, colores)
+  GET  /api/library/<patrón>.png       → textura de un material (miniaturas del visor)
+  POST /api/models                     → cuerpo = GLB base (sin comprimir); crea un trabajo para
+                                         materializar un modelo abierto desde disco
+  POST /api/jobs/<id>/materials        → cuerpo = materials.json (application/json);
+       [?preview=1]                      valida y materializa: preview → model.preview.glb;
+                                         sin preview confirma una revisión nueva (mat-00N)
 
 Seguridad: el archivo subido se guarda con nombre fijo (solo se usa su extensión), con límite
 de tamaño; los ids de trabajo y los nombres de archivo se validan con una lista blanca (sin
@@ -46,6 +54,14 @@ from extrude.converters import converter_statuses, ensure_dxf
 from extrude.dxf_reader import read_dxf
 from extrude.errors import ExtrudeError
 from extrude.init_config import draft_config
+from extrude.materials_service import (
+    BASE_GLB,
+    PlanRejected,
+    apply_plan,
+    inspect_base,
+    library_payload,
+    texture_png,
+)
 from extrude.node_tools import Compression
 
 DEFAULT_PORT = 8765
@@ -59,6 +75,7 @@ BUSY_RETRY_AFTER_S = 30
 # Timeout de lectura por operación del socket: un cliente que deja de enviar libera el hilo
 REQUEST_TIMEOUT_S = 30
 DISCARD_LIMIT_FACTOR = 4
+MAX_PLAN_BODY = 5 * 1024 * 1024
 ALLOWED_INPUTS = {".dwg", ".dxf"}
 JOB_ID = re.compile(r"^[0-9a-f]{32}$")
 JOB_FILES = {
@@ -68,7 +85,13 @@ JOB_FILES = {
     "config.yaml": "application/yaml; charset=utf-8",
     "manifest.json": "application/json",
     "objects.json": "application/json",
+    "materials.json": "application/json",
+    "model.preview.glb": "model/gltf-binary",
+    "model.materialized.glb": "model/gltf-binary",
 }
+PLAN_CONTENT_TYPE = "application/json"
+MATERIALS_PATH = re.compile(r"^/api/jobs/([0-9a-f]{32})/materials$")
+LIBRARY_TEXTURE = re.compile(r"^/api/library/([a-z]{1,32})\.png$")
 # Los INSERT pueden quedar fuera del bbox geométrico: los índices de convert._write_tiles
 # son enteros con signo, sin límite de seis dígitos. Solo se admiten dígitos ASCII.
 TILE_FILE = re.compile(r"tiles/tile_-?[0-9]+_-?[0-9]+\.glb")
@@ -192,6 +215,10 @@ class JobStore:
         """Trabajo abortado antes de encolarse: fuera de activos y su carpeta, borrada."""
         self.finish(job_id)
         shutil.rmtree(self.root / job_id, ignore_errors=True)
+
+    def is_active(self, job_id: str) -> bool:
+        with self._lock:
+            return job_id in self._active
 
     @property
     def active_count(self) -> int:
@@ -540,6 +567,125 @@ def make_handler(
             self.end_headers()
             self.wfile.write(body)
 
+        def _bytes(self, data: bytes, content_type: str) -> None:
+            self.send_response(HTTPStatus.OK)
+            self._cors()
+            self.send_header("Content-Type", content_type)
+            # Los GLB y planes de un trabajo cambian al confirmar: sin caché
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _read_body(self, limit: int, what: str) -> bytes:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                raise RequestError(HTTPStatus.BAD_REQUEST, "Cuerpo vacío.", f"Envía {what}.")
+            if length > limit:
+                self._discard(length)
+                raise RequestError(
+                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                    f"El cuerpo supera el límite de {limit // 1_048_576} MB.",
+                    "Arranca el servidor con --max-mb mayor.",
+                )
+            data = self.rfile.read(length)
+            if len(data) != length:
+                raise RequestError(
+                    HTTPStatus.BAD_REQUEST, "El cuerpo llegó incompleto.", "Reintenta el envío."
+                )
+            return data
+
+        def _origin_refused(self, content_type: str) -> bool:
+            """Misma regla que la subida de planos: origen permitido y un tipo que obliga a la
+            comprobación previa CORS (application/octet-stream o application/json)."""
+            origin = self.headers.get("Origin")
+            if origin is None:
+                return False
+            sent = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if origin in settings.allowed_origins and sent == content_type:
+                return False
+            self.close_connection = True
+            if origin not in settings.allowed_origins:
+                self._error(
+                    HTTPStatus.FORBIDDEN,
+                    "Origen no permitido.",
+                    "Abre el visor desde un origen permitido (--origin).",
+                )
+            else:
+                self._error(
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                    f"Envía el cuerpo como {content_type}.",
+                    "Usa el visor de Extrude.",
+                )
+            return True
+
+        def _post_materials(self, path: str, params: dict[str, list[str]]) -> None:
+            """POST /api/models y POST /api/jobs/<id>/materials."""
+            try:
+                if path == "/api/models":
+                    if self._origin_refused(UPLOAD_CONTENT_TYPE):
+                        return
+                    data = self._read_body(settings.max_bytes, "el GLB base")
+                    revision = inspect_base(data)
+                    job_id, job_dir = store.create()
+                    try:
+                        out = job_dir / "out"
+                        out.mkdir()
+                        (out / BASE_GLB).write_bytes(data)
+                    except BaseException:
+                        store.discard(job_id)
+                        raise
+                    store.finish(job_id)
+                    self._json(
+                        HTTPStatus.CREATED,
+                        {
+                            "job": job_id,
+                            "geometryRevision": revision,
+                            "files": {"glb": f"/api/jobs/{job_id}/{BASE_GLB}"},
+                        },
+                    )
+                    return
+                match = MATERIALS_PATH.match(path)
+                if match is None:
+                    raise RequestError(HTTPStatus.NOT_FOUND, "Ruta desconocida.", "Revisa la URL.")
+                if self._origin_refused(PLAN_CONTENT_TYPE):
+                    return
+                job_id = match.group(1)
+                job_dir = settings.jobs_dir / job_id
+                if not (job_dir / "out").is_dir() or store.is_active(job_id):
+                    raise RequestError(
+                        HTTPStatus.NOT_FOUND if not job_dir.is_dir() else HTTPStatus.CONFLICT,
+                        "El trabajo no existe o aún se está convirtiendo.",
+                        "Espera a que termine o vuelve a convertir el plano.",
+                    )
+                body = self._read_body(MAX_PLAN_BODY, "materials.json")
+                preview = params.get("preview", [""])[0].lower() in ("1", "true", "yes")
+                result = apply_plan(job_dir / "out", body, preview=preview)
+                result["url"] = f"/api/jobs/{job_id}/{result['file']}"
+                if result["plan"]:
+                    result["planUrl"] = f"/api/jobs/{job_id}/{result['plan']}"
+                self._json(HTTPStatus.OK, result)
+            except TimeoutError:
+                self.close_connection = True
+            except RequestError as exc:
+                self._error(exc.status, exc.problem, exc.fix)
+            except PlanRejected as exc:
+                self._json(
+                    HTTPStatus.UNPROCESSABLE_ENTITY,
+                    {"error": exc.problem, "fix": exc.fix, "issues": exc.issues},
+                )
+            except ExtrudeError as exc:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.problem, exc.fix)
+            except ValueError as exc:
+                self._error(HTTPStatus.BAD_REQUEST, str(exc), "Revisa la petición.")
+            except Exception as exc:  # respuesta JSON en vez de cortar la conexión
+                self.log_error("Error inesperado: %r", exc)
+                self._error(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    f"Error inesperado al materializar: {exc}",
+                    "Revisa la consola de extrude serve.",
+                )
+
         def _discard(self, length: int) -> None:
             """Lee y descarta un cuerpo rechazado para que el cliente reciba la respuesta (si no,
             en Windows suele ver un corte de conexión). Si es desmesurado, se cierra sin leer."""
@@ -632,6 +778,17 @@ def make_handler(
                     },
                 )
                 return
+            if parts == ["api", "library"]:
+                self._json(HTTPStatus.OK, library_payload())
+                return
+            texture_match = LIBRARY_TEXTURE.match(urlparse(self.path).path)
+            if texture_match:
+                png = texture_png(texture_match.group(1))
+                if png is None:
+                    self._error(HTTPStatus.NOT_FOUND, "Textura desconocida.", "Usa /api/library.")
+                    return
+                self._bytes(png, "image/png")
+                return
             if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "status":
                 status = store.status(parts[2])
                 if status is None:
@@ -653,13 +810,7 @@ def make_handler(
                     )
                     return
                 path, content_type = found
-                data = path.read_bytes()
-                self.send_response(HTTPStatus.OK)
-                self._cors()
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                self._bytes(path.read_bytes(), content_type)
                 return
             self._error(
                 HTTPStatus.NOT_FOUND, "Ruta desconocida.", "Usa /api/health o /api/convert."
@@ -667,6 +818,12 @@ def make_handler(
 
         def do_POST(self) -> None:
             url = urlparse(self.path)
+            if url.path == "/api/models" or MATERIALS_PATH.match(url.path):
+                if self._forbidden_host():
+                    self.close_connection = True
+                    return
+                self._post_materials(url.path, parse_qs(url.query))
+                return
             if url.path != "/api/convert":
                 self._error(HTTPStatus.NOT_FOUND, "Ruta desconocida.", "Usa POST /api/convert.")
                 return

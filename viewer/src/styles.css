@@ -2509,3 +2509,157 @@ body.is-zen .quality-summary {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --- Pestaña Materiales ------------------------------------------------------------------- */
+
+.mat-status {
+  margin: 4px 16px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-muted);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mat-objects,
+.mat-assignments,
+.mat-issues {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mat-objects {
+  max-height: 220px;
+  overflow-y: auto;
+  border-block: 1px solid var(--border-subtle);
+}
+
+.materials-panel .search {
+  width: 100%;
+}
+
+.mat-object {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px;
+  font-size: 12.5px;
+}
+
+.mat-object:hover {
+  background: var(--bg-panel-hover);
+}
+
+.mat-object.is-picked {
+  box-shadow: inset 3px 0 0 var(--highlight);
+  background: var(--highlight-soft);
+}
+
+.mat-object label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.mat-layer {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mat-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.mat-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+}
+
+.mat-inline .input-number {
+  width: 100%;
+}
+
+.input-number {
+  font-variant-numeric: tabular-nums;
+}
+
+.mat-assignment {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12.5px;
+}
+
+.mat-assignment.has-issue {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.mat-assignment-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mat-assignment-text span {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mat-swatch {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+}
+
+.mat-issue,
+.mat-issue-inline {
+  color: var(--danger);
+  font-size: 12px;
+  white-space: normal !important;
+}
+
+.mat-issue {
+  padding: 6px 0;
+}
+
+.mat-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: auto;
+  padding: 10px 12px 12px 16px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+
+.mat-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 12px 16px;
+}

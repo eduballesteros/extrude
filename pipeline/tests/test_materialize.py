@@ -20,7 +20,7 @@ from extrude.errors import ExtrudeError
 from extrude.gltf_export import INSTANCING_EXT
 from extrude.material_library import LIBRARY_VERSION
 from extrude.materiality import parse_plan
-from extrude.materialize import _Glb, materialize
+from extrude.materialize import GlbData, materialize
 from extrude.node_tools import tools_dir, validate
 from extrude.surfaces import Surface
 
@@ -117,7 +117,7 @@ def objects(out: Path, layer: str) -> list[dict[str, Any]]:
 
 def primitives(data: bytes) -> list[dict[str, Any]]:
     """Primitivas de triángulos con sus atributos decodificados y el nombre de su material."""
-    glb = _Glb(data)
+    glb = GlbData(data)
     doc = glb.doc
     out = []
     for node in doc["nodes"]:
@@ -190,10 +190,10 @@ def test_textures_are_embedded_and_output_is_deterministic(tmp_path: Path) -> No
     first, _ = materialize(base, plan)
     second, _ = materialize(base, plan)
     assert first == second
-    doc = _Glb(first).doc
+    doc = GlbData(first).doc
     assert all("uri" not in image and "bufferView" in image for image in doc["images"])
     assert all("uri" not in buffer for buffer in doc["buffers"])
-    png = _Glb(first)
+    png = GlbData(first)
     view = doc["bufferViews"][doc["images"][0]["bufferView"]]
     start = view["byteOffset"]
     assert png.blob[start : start + 8] == b"\x89PNG\r\n\x1a\n"
@@ -265,7 +265,7 @@ def test_rotation_parameter_turns_the_texture(tmp_path: Path) -> None:
 
 
 def instanced_nodes(data: bytes) -> list[dict[str, Any]]:
-    return [n for n in _Glb(data).doc["nodes"] if INSTANCING_EXT in n.get("extensions", {})]
+    return [n for n in GlbData(data).doc["nodes"] if INSTANCING_EXT in n.get("extensions", {})]
 
 
 def test_changing_one_insert_copy_keeps_the_others(tmp_path: Path) -> None:
@@ -283,7 +283,7 @@ def test_changing_one_insert_copy_keeps_the_others(tmp_path: Path) -> None:
     assert sorted(n["extras"]["instances"] for n in nodes) == [1, 9]
     single = next(n for n in nodes if n["extras"]["instances"] == 1)
     assert single["extras"]["object_ids"] == [[chosen]]
-    doc = _Glb(data).doc
+    doc = GlbData(data).doc
     names = {
         doc["materials"][p["material"]]["name"]
         for n in nodes
@@ -311,7 +311,7 @@ def test_scaled_insert_does_not_enlarge_bricks(tmp_path: Path) -> None:
     )
     nodes = instanced_nodes(data)
     assert len(nodes) == 2  # separadas por escala: cada una con su UV física
-    glb = _Glb(data)
+    glb = GlbData(data)
     spans = {}
     for node in nodes:
         scale = glb.array(node["extensions"][INSTANCING_EXT]["attributes"]["SCALE"])[0]
@@ -403,7 +403,7 @@ def test_color_compensation_keeps_the_hue(tmp_path: Path) -> None:
         (out / "model.glb").read_bytes(),
         plan_for(out, assign(ids, "facade_exterior", "brick_light")),
     )
-    material = next(m for m in _Glb(data).doc["materials"] if m["name"] == "Ladrillo claro")
+    material = next(m for m in GlbData(data).doc["materials"] if m["name"] == "Ladrillo claro")
     factor = material["pbrMetallicRoughness"]["baseColorFactor"][:3]
     expected = srgb_to_linear("#d8c3a5")
     assert max(factor) <= 1

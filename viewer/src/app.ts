@@ -79,7 +79,13 @@ export class App {
   /** Nombre del HDRI cargado en esta sesión (el contenido no se guarda en las vistas). */
   hdriName: string | null = null;
 
-  private readonly listeners = { model: new Set<Listener>(), state: new Set<Listener>() };
+  private readonly listeners = {
+    model: new Set<Listener>(),
+    state: new Set<Listener>(),
+    selection: new Set<Listener>(),
+  };
+  /** Objeto pulsado en la vista 3D (ID persistente), para el panel de materiales. */
+  selectedObjectId: string | null = null;
   private readonly raycaster = new Raycaster();
   private pointerDown = new Vector2();
   private lastFrame = performance.now();
@@ -155,6 +161,7 @@ export class App {
     name?: string,
     onProgress?: ProgressCallback,
     signal?: AbortSignal,
+    options: { keepView?: boolean } = {},
   ): Promise<LoadedModel> {
     const model =
       typeof source !== 'string'
@@ -168,7 +175,7 @@ export class App {
       disposeObject(model.root);
       signal.throwIfAborted();
     }
-    this.setModel(model);
+    this.setModel(model, options.keepView ?? false);
     return model;
   }
 
@@ -248,7 +255,13 @@ export class App {
     return true;
   }
 
-  private setModel(model: LoadedModel): void {
+  /**
+   * `keepView`: sustituir el modelo por otra versión del mismo (materiales previsualizados o
+   * confirmados) sin mover la cámara, el sol ni la visibilidad y color de las capas.
+   */
+  private setModel(model: LoadedModel, keepView = false): void {
+    const previousLayers = this.state.layers;
+    const previousGround = this.state.ground.enabled;
     this.releaseModel();
     this.model = model;
     model.root.traverse((o: Object3D) => {
@@ -262,14 +275,22 @@ export class App {
     this.scene.add(model.root);
     this.sceneBox = boundsOf(model.root);
     this.nav.setSceneBox(this.sceneBox);
-    this.nav.frame(this.sceneBox);
+    if (!keepView) this.nav.frame(this.sceneBox);
     this.lighting.setSceneBox(this.sceneBox);
     this.ground.fit(this.sceneBox);
     this.layers.attach(model.root);
-    this.state.layers = this.layers.initialState();
+    const initial = this.layers.initialState();
+    this.state.layers = keepView
+      ? Object.assign(
+          initial,
+          Object.fromEntries(Object.entries(previousLayers).filter(([name]) => name in initial)),
+        )
+      : initial;
     // Con terreno propio (TIN), el suelo auxiliar sobra y competiría con él en profundidad
-    this.state.ground.enabled = ![...this.layers.layers.values()].some((l) => l.kind === 'terrain');
-    const located = this.geolocateSun(model);
+    this.state.ground.enabled = keepView
+      ? previousGround
+      : ![...this.layers.layers.values()].some((l) => l.kind === 'terrain');
+    const located = keepView ? false : this.geolocateSun(model);
     this.info.hide();
     this.applyAll();
     this.emit('model');
@@ -400,8 +421,11 @@ export class App {
       this.placing = null;
       return;
     }
-    if (hit) this.info.show(describeHit(hit));
+    const info = hit ? describeHit(hit) : null;
+    if (info) this.info.show(info);
     else this.info.hide();
+    this.selectedObjectId = info?.objectId ?? null;
+    this.emit('selection');
   }
 
   // --- Bucle ----------------------------------------------------------------

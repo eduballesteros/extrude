@@ -69,7 +69,7 @@ class MaterializeStats:
     size_bytes: int
 
 
-class _Glb:
+class GlbData:
     def __init__(self, data: bytes) -> None:
         self.doc, self.blob = decode_glb(data)
 
@@ -89,7 +89,7 @@ class _Glb:
         return values.reshape(-1, width) if width > 1 else values.copy()
 
 
-def _check_base(doc: dict[str, Any]) -> dict[str, Any]:
+def check_base(doc: dict[str, Any]) -> dict[str, Any]:
     used = set(doc.get("extensionsUsed", [])) | set(doc.get("extensionsRequired", []))
     if used & set(COMPRESSION_EXTENSIONS):
         raise ExtrudeError(
@@ -110,7 +110,7 @@ def _check_base(doc: dict[str, Any]) -> dict[str, Any]:
     return extras
 
 
-def _triangle_prims(glb: _Glb, mesh: int) -> list[dict[str, Any]]:
+def _triangle_prims(glb: GlbData, mesh: int) -> list[dict[str, Any]]:
     return [
         p
         for p in glb.doc["meshes"][mesh]["primitives"]
@@ -118,7 +118,7 @@ def _triangle_prims(glb: _Glb, mesh: int) -> list[dict[str, Any]]:
     ]
 
 
-def glb_catalog(glb: _Glb, revision: str) -> dict[str, Any]:
+def glb_catalog(glb: GlbData, revision: str) -> dict[str, Any]:
     """Catálogo mínimo (IDs, etiquetas, superficies) deducido del propio GLB."""
     surfaces: dict[str, set[str]] = defaultdict(set)
     labels: dict[str, str] = {}
@@ -156,7 +156,7 @@ def glb_catalog(glb: _Glb, revision: str) -> dict[str, Any]:
 
 
 class _Materializer:
-    def __init__(self, glb: _Glb, plan: MaterialPlan, library: MaterialLibrary) -> None:
+    def __init__(self, glb: GlbData, plan: MaterialPlan, library: MaterialLibrary) -> None:
         self.glb = glb
         self.plan = plan
         self.library = library
@@ -506,8 +506,8 @@ class _Materializer:
 def materialize(
     data: bytes, plan: MaterialPlan, library: MaterialLibrary = DEFAULT_LIBRARY
 ) -> tuple[bytes, MaterializeStats]:
-    glb = _Glb(data)
-    extras = _check_base(glb.doc)
+    glb = GlbData(data)
+    extras = check_base(glb.doc)
     catalog = glb_catalog(glb, extras["geometry_revision"])
     if not catalog["objects"]:
         raise ExtrudeError(

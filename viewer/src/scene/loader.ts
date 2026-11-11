@@ -14,6 +14,10 @@ export interface SceneExtras {
   center_lon?: number | null;
   axis_transform?: string;
   bbox: { min: [number, number, number]; max: [number, number, number] } | null;
+  /** Revisión de la geometría construida (objects.json); falta en GLB anteriores. */
+  geometry_revision?: string;
+  /** Solo en un GLB materializado: revisión del plan de materiales aplicado. */
+  material_revision?: string;
 }
 
 export interface LoadedModel {

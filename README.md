@@ -235,6 +235,23 @@ just dev                # http://localhost:5173
 
 Al terminar, el hub se desvanece y aparece el espacio de trabajo. *Abrir* (barra superior) lo vuelve a mostrar.
 
+**Materiales** (pestaña de la barra izquierda, necesita `just serve`). Asignación manual por
+edificio y superficie, sin IA:
+- marca objetos en la lista (E-001…, filtrable) o pulsa uno en la vista y usa *+ Pulsado en 3D*;
+- elige superficie (solo las que tienen esos objetos: fachada, patio, cubierta, zócalo…),
+  material de la biblioteca, color, rugosidad, tamaño de pieza en metros y giro;
+- *Añadir asignación*: una asignación nueva prevalece sobre las anteriores para esos mismos
+  objeto y superficie, así que el plan nunca tiene conflictos. *Deshacer*/*Rehacer* (Ctrl+Z/Y);
+- *Previsualizar* materializa en el servidor y recarga el modelo sin mover cámara, sol ni capas;
+  *Descartar* vuelve al último estado confirmado; *Confirmar* guarda una revisión nueva
+  (`mat-001`, `mat-002`…) y ofrece el GLB materializado y `materials.json` para descargar;
+- *Importar/Exportar plan* lee o guarda `materials.json`. El borrador se recuerda en el
+  navegador para cada revisión geométrica.
+
+Funciona con modelos convertidos desde el visor y con GLB base abiertos desde disco (se suben a
+`extrude serve` al previsualizar). Un GLB ya materializado no se vuelve a editar: abre su base.
+Al aplicar materiales se quitan los colores de capa para no teñir las texturas.
+
 | Zona | Contenido |
 |---|---|
 | Barra superior | Modelo y su origen UTM/CRS, *Abrir*, perspectiva/ortográfica, *Encuadrar* (F), menú *Exportar* (PNG, Blender, views.json, GLB con cámaras y luces, importar vistas, resultados de la conversión), modo zen (Tab) |
