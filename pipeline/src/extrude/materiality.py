@@ -89,6 +89,22 @@ class Omission(_Strict):
     reason: Annotated[str, StringConstraints(max_length=500)] | None = None
 
 
+Note = Annotated[str, StringConstraints(max_length=400)]
+
+
+class AiTrace(_Strict):
+    """Trazabilidad opcional de una propuesta de IA revisada (sin credenciales ni contexto)."""
+
+    provider: Annotated[str, StringConstraints(pattern=r"^[a-z]{1,20}$")]
+    model: Annotated[str, StringConstraints(max_length=100)]
+    simulated: bool = False
+    prompt_version: Annotated[str, StringConstraints(max_length=40)]
+    summary: Annotated[str, StringConstraints(max_length=800)]
+    explicit_requirements: list[Note] = Field(default_factory=list, max_length=40)
+    assumptions: list[Note] = Field(default_factory=list, max_length=40)
+    created_at: Annotated[str, StringConstraints(max_length=40)] | None = None
+
+
 class MaterialPlan(_Strict):
     schema_version: Literal[1]
     project_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.-]{1,64}$")]
@@ -98,6 +114,7 @@ class MaterialPlan(_Strict):
     assignments: list[Assignment] = Field(default_factory=list)
     omissions: list[Omission] = Field(default_factory=list)
     description: Annotated[str, StringConstraints(max_length=10_000)] | None = None
+    ai: AiTrace | None = None  # se puede borrar `description` y conservar esto (RS-10)
 
     def to_json(self) -> str:
         data = self.model_dump(mode="json", by_alias=True, exclude_none=True)

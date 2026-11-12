@@ -143,10 +143,54 @@ def serve(
         list[str] | None, typer.Option(help="Origen permitido por CORS (repetible)")
     ] = None,
     jobs_dir: Annotated[Path | None, typer.Option(help="Carpeta de trabajos")] = None,
+    ai_simulated: Annotated[
+        bool,
+        typer.Option(
+            "--ai-simulated",
+            help="Añade un proveedor de IA simulado (reglas locales, sin red ni coste)",
+        ),
+    ] = False,
+    shared: Annotated[
+        bool,
+        typer.Option(
+            "--shared",
+            help="Modo multiusuario: inicio de sesión, permisos por proyecto y límites "
+            "(no cambia --host: sigue siendo local salvo que lo indiques)",
+        ),
+    ] = False,
+    users: Annotated[
+        Path | None, typer.Option(help="Archivo de usuarios (extrude users add) para --shared")
+    ] = None,
 ) -> None:
     """Servidor local para que el visor convierta DWG/DXF arrastrándolos."""
+    from extrude.access import AccessControl, Accounts, SharedMode
+    from extrude.ai_planner import AiService, default_providers
+
     origins = tuple(origin) if origin else DEFAULT_ORIGINS
-    server = create_server(host, port, jobs_dir=jobs_dir, max_mb=max_mb, allowed_origins=origins)
+    ai = AiService(default_providers(simulated=ai_simulated))
+    mode = None
+    with _user_errors():
+        if shared:
+            if users is None:
+                raise ExtrudeError("--shared necesita --users.", "Ej.: --users usuarios.json")
+            root = jobs_dir or Path(tempfile.gettempdir()) / "extrude-jobs"
+            root.mkdir(parents=True, exist_ok=True)
+            mode = SharedMode(Accounts(users), AccessControl(root))
+            jobs_dir = root
+        server = create_server(
+            host,
+            port,
+            jobs_dir=jobs_dir,
+            max_mb=max_mb,
+            allowed_origins=origins,
+            ai=ai,
+            shared=mode,
+        )
+    if mode is not None:
+        typer.echo(f"Modo compartido: {len(mode.accounts.names())} usuarios; sesión obligatoria.")
+    for entry in ai.providers_payload()["providers"]:
+        state = "listo" if entry["available"] else f"no disponible: {entry['reason']}"
+        typer.echo(f"IA {entry['name']} ({entry['model'] or 'sin modelo'}): {state}")
     typer.echo(f"Extrude escuchando en http://{host}:{port} (orígenes: {', '.join(origins)})")
     typer.echo("Abre el visor y arrastra un .dwg o .dxf. Ctrl+C para salir.")
     try:
@@ -155,6 +199,43 @@ def serve(
         typer.echo("Servidor detenido.")
     finally:
         server.server_close()
+
+
+users_app = typer.Typer(help="Usuarios del modo compartido (extrude serve --shared)")
+app.add_typer(users_app, name="users")
+
+
+@users_app.command("add")
+def users_add(
+    name: Annotated[str, typer.Argument(help="Nombre de usuario (minúsculas, dígitos, . _ -)")],
+    users: Annotated[Path, typer.Option(help="Archivo de usuarios")],
+    password_stdin: Annotated[
+        bool, typer.Option("--password-stdin", help="Lee la contraseña de la entrada estándar")
+    ] = False,
+) -> None:
+    """Crea o cambia un usuario (contraseña con scrypt; nunca se guarda en claro)."""
+    import getpass
+
+    from extrude.access import Accounts
+
+    with _user_errors():
+        if password_stdin:
+            password = sys.stdin.readline().rstrip("\r\n")
+        else:
+            password = getpass.getpass("Contraseña: ")
+            if getpass.getpass("Repite la contraseña: ") != password:
+                raise ExtrudeError("Las contraseñas no coinciden.", "Vuelve a intentarlo.")
+        Accounts(users).add(name, password)
+    typer.echo(f"Usuario '{name}' guardado en {users}.")
+
+
+@users_app.command("list")
+def users_list(users: Annotated[Path, typer.Option(help="Archivo de usuarios")]) -> None:
+    """Lista los usuarios (sin datos de contraseña)."""
+    from extrude.access import Accounts
+
+    for name in Accounts(users).names():
+        typer.echo(name)
 
 
 @app.command("init-config")

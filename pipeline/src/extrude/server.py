@@ -19,6 +19,12 @@ Solo librería estándar. Pensado para uso local (escucha en 127.0.0.1 por defec
   POST /api/jobs/<id>/materials        → cuerpo = materials.json (application/json);
        [?preview=1]                      valida y materializa: preview → model.preview.glb;
                                          sin preview confirma una revisión nueva (mat-00N)
+  GET  /api/ai/providers               → proveedores de IA (sin claves), límites y tarifas
+  POST /api/jobs/<id>/ai/context       → JSON de solicitud; devuelve lo que se enviaría (sin
+                                         llamar a la IA) para revisarlo antes de autorizar
+  POST /api/jobs/<id>/ai/propose       → una única llamada al proveedor elegido (o caché);
+                                         devuelve una propuesta validada, nunca un plan aplicado
+  POST /api/jobs/<id>/ai/cache/clear   → borra la caché de propuestas del trabajo
 
 Seguridad: el archivo subido se guarda con nombre fijo (solo se usa su extensión), con límite
 de tamaño; los ids de trabajo y los nombres de archivo se validan con una lista blanca (sin
@@ -31,6 +37,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import json
 import math
 import queue
@@ -40,7 +47,7 @@ import tempfile
 import threading
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -48,21 +55,35 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from extrude import __version__
+from extrude.access import ACCESS_FILE, SharedMode, has_role, required_role
+from extrude.ai_planner import AiError, AiService, parse_request
 from extrude.config import load_config
 from extrude.convert import ConvertOptions, convert
 from extrude.converters import converter_statuses, ensure_dxf
 from extrude.dxf_reader import read_dxf
+from extrude.edit_tools import tools_payload
 from extrude.errors import ExtrudeError
 from extrude.init_config import draft_config
+from extrude.master import (
+    MASTER_GLB,
+    decompress_to_master,
+    export_compressed,
+    is_compressed_glb,
+)
 from extrude.materials_service import (
     BASE_GLB,
     PlanRejected,
+    StaleRevision,
     apply_plan,
     inspect_base,
     library_payload,
+    project_status,
+    step,
     texture_png,
 )
 from extrude.node_tools import Compression
+from extrude.project_edit import apply_edit, parse_apply
+from extrude.project_state import LOCK
 
 DEFAULT_PORT = 8765
 DEFAULT_MAX_MB = 500
@@ -88,13 +109,22 @@ JOB_FILES = {
     "materials.json": "application/json",
     "model.preview.glb": "model/gltf-binary",
     "model.materialized.glb": "model/gltf-binary",
+    "model.current.glb": "model/gltf-binary",
+    "model.master.glb": "model/gltf-binary",
 }
+JOB_PATH = re.compile(r"^/api/jobs/([0-9a-f]{32})(?:/(.*))?$")
+EXPORT_PATH = re.compile(r"^/api/jobs/([0-9a-f]{32})/export/(draco|meshopt)$")
 PLAN_CONTENT_TYPE = "application/json"
 MATERIALS_PATH = re.compile(r"^/api/jobs/([0-9a-f]{32})/materials$")
+AI_PATH = re.compile(
+    r"^/api/jobs/([0-9a-f]{32})/(ai/context|ai/propose|ai/cache/clear|edit/apply|project/undo"
+    r"|project/redo)$"
+)
+MAX_AI_BODY = 2 * 1024 * 1024
 LIBRARY_TEXTURE = re.compile(r"^/api/library/([a-z]{1,32})\.png$")
 # Los INSERT pueden quedar fuera del bbox geométrico: los índices de convert._write_tiles
 # son enteros con signo, sin límite de seis dígitos. Solo se admiten dígitos ASCII.
-TILE_FILE = re.compile(r"tiles/tile_-?[0-9]+_-?[0-9]+\.glb")
+TILE_FILE = re.compile(r"tiles/tile_-?[0-9]+_-?[0-9]+(?:\.rev-[0-9]{3,})?\.glb")
 TILE_CONTENT_TYPE = "model/gltf-binary"
 CONFIG_HEADER = "X-Extrude-Config"
 
@@ -155,6 +185,8 @@ class ServerSettings:
     allowed_origins: tuple[str, ...]
     # Escuchando en loopback, solo se aceptan esos nombres en Host (contra DNS rebinding)
     loopback_only: bool = True
+    # Modo multiusuario (--shared): cuentas, sesiones, permisos y límites (access.py)
+    shared: SharedMode | None = field(default=None, compare=False)
 
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -182,6 +214,7 @@ class JobStore:
         self._active: set[str] = set()
         self._lock = threading.Lock()
         self._prune_lock = threading.Lock()  # una poda a la vez (elección + borrado)
+        self.on_create: Callable[[str], None] | None = None
 
     def update(self, job_id: str, **changes: Any) -> None:
         with self._lock:
@@ -203,6 +236,8 @@ class JobStore:
         with self._lock:
             path.mkdir()
             self._active.add(job_id)
+            if self.on_create is not None:
+                self.on_create(job_id)  # modo compartido: dueño = usuario de la petición
         self.prune()
         return job_id, path
 
@@ -250,6 +285,7 @@ class JobStore:
     def prune(self, keep: int = MAX_JOBS) -> None:
         """Borra los trabajos terminados más antiguos por encima de `keep` (y sus estados).
         Los activos (en cola o convirtiéndose) no cuentan ni se tocan.
+        Los proyectos con propietario son persistentes: su cuota limita las altas, no los borra.
 
         La lista de carpetas y la de activos se toman juntas bajo el lock de create(): una
         carpeta recién creada o ya está reservada o aún no existe, nunca «huérfana». Los
@@ -264,7 +300,10 @@ class JobStore:
                     (
                         p
                         for p in self.root.iterdir()
-                        if p.is_dir() and JOB_ID.match(p.name) and p.name not in active
+                        if p.is_dir()
+                        and JOB_ID.match(p.name)
+                        and p.name not in active
+                        and not (p / ACCESS_FILE).is_file()
                     ),
                     key=lambda p: p.stat().st_mtime,
                 )
@@ -272,11 +311,6 @@ class JobStore:
                 shutil.rmtree(old, ignore_errors=True)
                 with self._lock:
                     self._statuses.pop(old.name, None)
-
-    @property
-    def status_count(self) -> int:
-        with self._lock:
-            return len(self._statuses)
 
 
 def _decode_config(header: str | None) -> str | None:
@@ -537,9 +571,13 @@ def _number(params: dict[str, list[str]], key: str) -> float | None:
 
 
 def make_handler(
-    settings: ServerSettings, store: JobStore, jobs: ConversionQueue | None = None
+    settings: ServerSettings,
+    store: JobStore,
+    jobs: ConversionQueue | None = None,
+    ai: AiService | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     work = jobs or ConversionQueue(store)
+    assistant = ai or AiService()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = f"extrude/{__version__}"
@@ -555,7 +593,9 @@ def make_handler(
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", f"Content-Type, {CONFIG_HEADER}")
+                self.send_header(
+                    "Access-Control-Allow-Headers", f"Content-Type, Authorization, {CONFIG_HEADER}"
+                )
                 self.send_header("Access-Control-Allow-Private-Network", "true")
 
         def _json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
@@ -566,6 +606,23 @@ def make_handler(
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _export(self, job_id: str, method: str) -> None:
+            """GET /api/jobs/<id>/export/<draco|meshopt>: GLB comprimido del estado actual."""
+            out = settings.jobs_dir / job_id / "out"
+            if store.is_active(job_id) or not out.is_dir():
+                self._error(HTTPStatus.NOT_FOUND, "Trabajo desconocido.", "Revisa el id.")
+                return
+            try:
+                with LOCK:
+                    status = project_status(out, job_id)
+                    name = Path(urlparse(status["modelUrl"]).path).name
+                    path = export_compressed(out, out / name, method, status["revision"])
+                    data = path.read_bytes()
+            except ExtrudeError as exc:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.problem, exc.fix)
+                return
+            self._bytes(data, "model/gltf-binary")
 
         def _bytes(self, data: bytes, content_type: str) -> None:
             self.send_response(HTTPStatus.OK)
@@ -626,12 +683,17 @@ def make_handler(
                     if self._origin_refused(UPLOAD_CONTENT_TYPE):
                         return
                     data = self._read_body(settings.max_bytes, "el GLB base")
-                    revision = inspect_base(data)
+                    compressed = is_compressed_glb(data)
+                    revision = None if compressed else inspect_base(data)
                     job_id, job_dir = store.create()
                     try:
                         out = job_dir / "out"
                         out.mkdir()
                         (out / BASE_GLB).write_bytes(data)
+                        if compressed:
+                            # Draco/Meshopt: se decodifica a un maestro editable (master.py)
+                            master = decompress_to_master(out)
+                            revision = inspect_base(master.read_bytes())
                     except BaseException:
                         store.discard(job_id)
                         raise
@@ -660,7 +722,28 @@ def make_handler(
                     )
                 body = self._read_body(MAX_PLAN_BODY, "materials.json")
                 preview = params.get("preview", [""])[0].lower() in ("1", "true", "yes")
-                result = apply_plan(job_dir / "out", body, preview=preview)
+                base = params.get("base", [None])[0]
+                if base is not None and not re.fullmatch(r"rev-[0-9]{3,}", base):
+                    raise RequestError(HTTPStatus.BAD_REQUEST, "base no válido.", "rev-NNN")
+                if settings.shared and not preview and base is None:
+                    raise RequestError(
+                        HTTPStatus.PRECONDITION_REQUIRED,
+                        "En un servidor compartido la confirmación lleva la revisión base.",
+                        "Actualiza el visor (envía ?base=rev-NNN).",
+                    )
+                try:
+                    result = apply_plan(job_dir / "out", body, preview=preview, expect=base)
+                except StaleRevision as exc:
+                    self._json(
+                        HTTPStatus.CONFLICT,
+                        {
+                            "error": exc.problem,
+                            "fix": "Recarga el proyecto: otra persona confirmó un cambio.",
+                            "kind": "stale_revision",
+                            "revision": exc.current,
+                        },
+                    )
+                    return
                 result["url"] = f"/api/jobs/{job_id}/{result['file']}"
                 if result["plan"]:
                     result["planUrl"] = f"/api/jobs/{job_id}/{result['plan']}"
@@ -683,6 +766,77 @@ def make_handler(
                 self._error(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
                     f"Error inesperado al materializar: {exc}",
+                    "Revisa la consola de extrude serve.",
+                )
+
+        def _post_ai(self, match: re.Match[str]) -> None:
+            """Fase 3: propuesta (como mucho una llamada al proveedor), aplicar un plan y
+            deshacer/rehacer revisiones. Aplicar y deshacer nunca llaman a la IA."""
+            if self._origin_refused(PLAN_CONTENT_TYPE):
+                return
+            job_id, action = match.group(1), match.group(2)
+            job_dir = settings.jobs_dir / job_id
+            try:
+                if not (job_dir / "out").is_dir() or store.is_active(job_id):
+                    raise RequestError(
+                        HTTPStatus.NOT_FOUND if not job_dir.is_dir() else HTTPStatus.CONFLICT,
+                        "El trabajo no existe o aún se está convirtiendo.",
+                        "Espera a que termine o vuelve a convertir el plano.",
+                    )
+                body = self._read_body(MAX_AI_BODY, "la solicitud en JSON")
+                if action in ("project/undo", "project/redo"):
+                    expect = parse_qs(urlparse(self.path).query).get("expect", [None])[0]
+                    if expect is not None and not re.fullmatch(r"rev-[0-9]{3,}", expect):
+                        raise RequestError(HTTPStatus.BAD_REQUEST, "expect no válido.", "rev-NNN")
+                    if settings.shared and expect is None:
+                        raise RequestError(
+                            HTTPStatus.PRECONDITION_REQUIRED,
+                            "En un servidor compartido deshacer/rehacer lleva la revisión actual.",
+                            "Actualiza el visor (envía ?expect=rev-NNN).",
+                        )
+                    try:
+                        state = step(
+                            job_dir / "out", job_id, forward=action.endswith("redo"), expect=expect
+                        )
+                    except StaleRevision as exc:
+                        raise AiError(
+                            409, "stale_revision", exc.problem, exc.fix, revision=exc.current
+                        ) from None
+                    self._json(HTTPStatus.OK, state)
+                    return
+                if action == "edit/apply":
+                    preview = parse_qs(urlparse(self.path).query).get("preview", [""])[0] == "1"
+                    result = apply_edit(job_dir, parse_apply(body), preview=preview)
+                    self._json(HTTPStatus.OK, result)
+                    return
+                action = action.removeprefix("ai/")
+                if action == "cache/clear":
+                    removed = assistant.clear_cache(job_dir)
+                    self._json(HTTPStatus.OK, {"removed": removed})
+                    return
+                request = parse_request(body)
+                if action == "context":
+                    self._json(HTTPStatus.OK, assistant.context_preview(job_id, job_dir, request))
+                else:
+                    self._json(HTTPStatus.OK, assistant.propose(job_id, job_dir, request))
+            except TimeoutError:
+                self.close_connection = True
+            except ConnectionError:  # el visor canceló o cerró la espera
+                pass  # el visor canceló la espera: la respuesta tardía se descarta
+            except RequestError as exc:
+                self._error(exc.status, exc.problem, exc.fix)
+            except AiError as exc:
+                payload: dict[str, Any] = {"error": exc.problem, "fix": exc.fix, "kind": exc.kind}
+                payload.update(exc.extra)
+                with contextlib.suppress(ConnectionError):
+                    self._json(HTTPStatus(exc.status), payload)
+            except ExtrudeError as exc:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.problem, exc.fix)
+            except Exception as exc:  # respuesta JSON en vez de cortar la conexión
+                self.log_error("Error inesperado en IA: %r", exc)
+                self._error(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    "Error inesperado al preparar la propuesta.",
                     "Revisa la consola de extrude serve.",
                 )
 
@@ -747,6 +901,117 @@ def make_handler(
                 return HTTPStatus.UNSUPPORTED_MEDIA_TYPE
             return None
 
+        def _bearer(self) -> str | None:
+            value = self.headers.get("Authorization") or ""
+            return value[7:].strip() if value.lower().startswith("bearer ") else None
+
+        def _gate(self, method: str) -> bool:
+            """Modo compartido: sesión válida, permiso sobre el trabajo y límites. True = ya
+            respondido (rechazado). En modo local no hace nada."""
+            shared = settings.shared
+            if shared is None:
+                return False
+            path = urlparse(self.path).path
+            shared.current_user = None
+            if path in ("/api/health", "/api/auth/login", "/api/auth/me"):
+                return False
+            user = shared.sessions.user(self._bearer())
+            if user is None:
+                self.close_connection = True  # no se lee un cuerpo que no se va a usar
+                self._json(
+                    HTTPStatus.UNAUTHORIZED,
+                    {
+                        "error": "Inicia sesión para usar este servidor compartido.",
+                        "fix": "Entra con tu usuario en el visor.",
+                        "kind": "auth_required",
+                    },
+                )
+                return True
+            shared.current_user = user
+            job = JOB_PATH.match(path)
+            if job:
+                rest = (job.group(2) or "").split("/")
+                role = shared.access.role(job.group(1), user)
+                if not has_role(role, required_role(method, rest)):
+                    self.close_connection = True
+                    # Sin permiso = como si no existiera: no se revela qué trabajos hay
+                    self._error(
+                        HTTPStatus.NOT_FOUND if role is None else HTTPStatus.FORBIDDEN,
+                        "No existe ese trabajo." if role is None else "Tu rol no permite cambios.",
+                        "Pide acceso a su dueño." if role is None else "Pide el rol editor.",
+                    )
+                    return True
+            creating = method == "POST" and path in ("/api/convert", "/api/models")
+            if creating and shared.access.owned_by(user) >= shared.limits.max_jobs_per_user:
+                self.close_connection = True
+                self._error(
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    f"Has llegado al máximo de {shared.limits.max_jobs_per_user} trabajos.",
+                    "Pide al administrador que libere trabajos antiguos.",
+                )
+                return True
+            asking = method == "POST" and path.endswith("/ai/propose")
+            if asking and not shared.ai_calls.allow(user):
+                self.close_connection = True
+                self._error(
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    f"Máximo de {shared.limits.max_ai_per_hour} consultas de IA por hora.",
+                    "Espera un rato antes de volver a consultar.",
+                )
+                return True
+            return False
+
+        def _auth_post(self, path: str) -> None:
+            """POST /api/auth/login|logout y /api/jobs/<id>/access."""
+            shared = settings.shared
+            if shared is None:
+                self._error(HTTPStatus.NOT_FOUND, "Servidor local sin cuentas.", "No hace falta.")
+                return
+            try:
+                body = json.loads(self._read_body(16 * 1024, "la petición") or b"{}")
+                if not isinstance(body, dict):
+                    raise ValueError("JSON no es un objeto")
+            except (ValueError, RequestError):
+                self._error(HTTPStatus.BAD_REQUEST, "Petición no válida.", "Envía JSON.")
+                return
+            if path == "/api/auth/login":
+                if self._origin_refused("application/json"):
+                    return
+                user, password = str(body.get("user", "")), str(body.get("password", ""))
+                try:
+                    token = shared.login(user, password)
+                except ExtrudeError as exc:
+                    self._error(HTTPStatus.TOO_MANY_REQUESTS, exc.problem, exc.fix)
+                    return
+                if token is None:
+                    self._error(
+                        HTTPStatus.UNAUTHORIZED, "Usuario o contraseña incorrectos.", "Revísalos."
+                    )
+                    return
+                self._json(
+                    HTTPStatus.OK,
+                    {"token": token, "user": user, "expiresInS": int(shared.sessions.ttl_s)},
+                )
+                return
+            if path == "/api/auth/logout":
+                shared.sessions.revoke(self._bearer())
+                self._json(HTTPStatus.OK, {"ok": True})
+                return
+            job = JOB_PATH.match(path)
+            if job and job.group(2) == "access":
+                target = str(body.get("user", ""))
+                if target not in shared.accounts.names():
+                    self._error(HTTPStatus.NOT_FOUND, f"No existe el usuario '{target}'.", "")
+                    return
+                try:
+                    data = shared.access.share(job.group(1), target, body.get("role"))
+                except ExtrudeError as exc:
+                    self._error(HTTPStatus.BAD_REQUEST, exc.problem, exc.fix)
+                    return
+                self._json(HTTPStatus.OK, {"owner": data["owner"], "members": data["members"]})
+                return
+            self._error(HTTPStatus.NOT_FOUND, "Ruta desconocida.", "Revisa la URL.")
+
         def do_OPTIONS(self) -> None:
             if self._forbidden_host():
                 return
@@ -761,9 +1026,24 @@ def make_handler(
             self.end_headers()
 
         def do_GET(self) -> None:
-            if self._forbidden_host():
+            if self._forbidden_host() or self._gate("GET"):
                 return
             parts = urlparse(self.path).path.strip("/").split("/")
+            if parts == ["api", "auth", "me"]:
+                shared = settings.shared
+                user = shared.sessions.user(self._bearer()) if shared else None
+                self._json(
+                    HTTPStatus.OK,
+                    {"mode": "shared" if shared else "local", "user": user},
+                )
+                return
+            if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "access":
+                data = settings.shared.access.read(parts[2]) if settings.shared else None
+                if data is None:
+                    self._error(HTTPStatus.NOT_FOUND, "Sin permisos (modo local).", "")
+                    return
+                self._json(HTTPStatus.OK, {"owner": data["owner"], "members": data["members"]})
+                return
             if parts == ["api", "health"]:
                 converters = [
                     {"name": s.name, "available": s.available} for s in converter_statuses()
@@ -780,6 +1060,32 @@ def make_handler(
                 return
             if parts == ["api", "library"]:
                 self._json(HTTPStatus.OK, library_payload())
+                return
+            if parts == ["api", "tools"]:
+                self._json(HTTPStatus.OK, tools_payload())
+                return
+            if (
+                len(parts) == 4
+                and parts[:2] == ["api", "jobs"]
+                and parts[3] == "project"
+                and re.fullmatch(r"[0-9a-f]{32}", parts[2])
+            ):
+                out = settings.jobs_dir / parts[2] / "out"
+                has_model = (out / BASE_GLB).is_file() or (out / MASTER_GLB).is_file()
+                if not has_model or store.is_active(parts[2]):
+                    self._error(HTTPStatus.NOT_FOUND, "Proyecto sin modelo base.", "Convierte.")
+                    return
+                try:
+                    self._json(HTTPStatus.OK, project_status(out, parts[2]))
+                except ExtrudeError as exc:
+                    self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.problem, exc.fix)
+                return
+            export = EXPORT_PATH.match(urlparse(self.path).path)
+            if export:
+                self._export(export.group(1), export.group(2))
+                return
+            if parts == ["api", "ai", "providers"]:
+                self._json(HTTPStatus.OK, assistant.providers_payload())
                 return
             texture_match = LIBRARY_TEXTURE.match(urlparse(self.path).path)
             if texture_match:
@@ -801,16 +1107,18 @@ def make_handler(
                     self._json(HTTPStatus.OK, status)
                 return
             if len(parts) >= 4 and parts[:2] == ["api", "jobs"]:
-                found = store.file(parts[2], "/".join(parts[3:]))
-                if found is None:
-                    self._error(
-                        HTTPStatus.NOT_FOUND,
-                        "No existe ese archivo de trabajo.",
-                        "Repite la conversión.",
-                    )
-                    return
-                path, content_type = found
-                self._bytes(path.read_bytes(), content_type)
+                with LOCK:
+                    found = store.file(parts[2], "/".join(parts[3:]))
+                    if found is None:
+                        self._error(
+                            HTTPStatus.NOT_FOUND,
+                            "No existe ese archivo de trabajo.",
+                            "Repite la conversión.",
+                        )
+                        return
+                    path, content_type = found
+                    file_bytes = path.read_bytes()
+                self._bytes(file_bytes, content_type)
                 return
             self._error(
                 HTTPStatus.NOT_FOUND, "Ruta desconocida.", "Usa /api/health o /api/convert."
@@ -818,6 +1126,19 @@ def make_handler(
 
         def do_POST(self) -> None:
             url = urlparse(self.path)
+            if self._forbidden_host() or self._gate("POST"):
+                self.close_connection = True
+                return
+            if url.path.startswith("/api/auth/") or url.path.endswith("/access"):
+                self._auth_post(url.path)
+                return
+            ai_match = AI_PATH.match(url.path)
+            if ai_match:
+                if self._forbidden_host():
+                    self.close_connection = True
+                    return
+                self._post_ai(ai_match)
+                return
             if url.path == "/api/models" or MATERIALS_PATH.match(url.path):
                 if self._forbidden_host():
                     self.close_connection = True
@@ -924,9 +1245,28 @@ def create_server(
     jobs_dir: Path | None = None,
     max_mb: int = DEFAULT_MAX_MB,
     allowed_origins: tuple[str, ...] = DEFAULT_ORIGINS,
+    ai: AiService | None = None,
+    shared: SharedMode | None = None,
 ) -> ThreadingHTTPServer:
     root = jobs_dir or Path(tempfile.gettempdir()) / "extrude-jobs"
     loopback = host_name(host) in LOOPBACK_HOSTS
-    settings = ServerSettings(root, max_mb * 1_048_576, allowed_origins, loopback_only=loopback)
+    settings = ServerSettings(
+        root, max_mb * 1_048_576, allowed_origins, loopback_only=loopback, shared=shared
+    )
     store = JobStore(root)
-    return ThreadingHTTPServer((host, port), make_handler(settings, store, ConversionQueue(store)))
+    if shared is not None:
+        if not shared.accounts.names():
+            raise ExtrudeError(
+                "El modo compartido necesita al menos un usuario.",
+                "Crea uno con `extrude users add NOMBRE --users ARCHIVO`.",
+            )
+
+        def owner(job_id: str) -> None:
+            user = shared.current_user
+            if user is not None:
+                shared.access.grant_owner(job_id, user)
+
+        store.on_create = owner
+    return ThreadingHTTPServer(
+        (host, port), make_handler(settings, store, ConversionQueue(store), ai)
+    )

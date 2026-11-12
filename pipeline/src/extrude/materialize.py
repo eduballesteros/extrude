@@ -496,6 +496,9 @@ class _Materializer:
             extras["instances"] = len(members)
             if node.get("extras", {}).get("object_ids"):
                 extras["object_ids"] = [object_ids[i] for i in members]
+                numbers = node["extras"].get("numbers")
+                if isinstance(numbers, list) and len(numbers) == len(object_ids):
+                    extras["numbers"] = [numbers[i] for i in members]
             if n:
                 nodes.append(target)
                 siblings.append(len(nodes) - 1)

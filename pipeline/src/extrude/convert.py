@@ -37,6 +37,7 @@ from extrude.node_tools import Compression, compress
 from extrude.report import write_reports
 
 MODEL_NAME = "model.glb"
+MASTER_GLB = "model.master.glb"
 TILES_DIR = "tiles"
 MANIFEST_NAME = "manifest.json"
 MANIFEST_SCHEMA_VERSION = 1
@@ -130,6 +131,10 @@ def convert(source: Path, options: ConvertOptions) -> ConvertResult:
             outputs = _write_tiles(layers, info, options.out_dir, options.tile_size)
         else:
             outputs = [_write(layers, info, options.out_dir / MODEL_NAME)]
+        # Maestro editable (sin comprimir, de una pieza) para teselas o compresión: las ediciones
+        # trabajan sobre él y regeneran lo que se entrega (ver master.py)
+        if (options.tile_size and any(o.tile for o in outputs)) or options.compression:
+            _write(layers, info, options.out_dir / MASTER_GLB)
         # Las referencias a nodos solo valen para un GLB único; con teselas el ID es la única clave.
         tiled = any(o.tile for o in outputs)
         catalog = build_catalog(
@@ -146,7 +151,13 @@ def convert(source: Path, options: ConvertOptions) -> ConvertResult:
             for output in outputs:
                 _compress_in_place(output, options.compression)
     if options.tile_size and any(o.tile for o in outputs):
-        _write_manifest(outputs, info, options.out_dir, options.tile_size)
+        bounds = _bounds(layers)
+        tile_origin = (
+            [float(bounds[0][0]), float(bounds[0][1])] if bounds is not None else [0.0, 0.0]
+        )
+        _write_manifest(
+            outputs, info, options.out_dir, options.tile_size, tile_origin, options.compression
+        )
 
     result = ConvertResult(read, build, layers, origin, outputs, timer.timings)
     result.geometry_revision = revision
@@ -306,7 +317,14 @@ def _tile_bbox(path: Path) -> dict[str, list[float]] | None:
     return bbox
 
 
-def _write_manifest(outputs: list[OutputFile], info: SceneInfo, out_dir: Path, size: float) -> None:
+def _write_manifest(
+    outputs: list[OutputFile],
+    info: SceneInfo,
+    out_dir: Path,
+    size: float,
+    tile_origin: list[float],
+    compression: Compression | None,
+) -> None:
     manifest = {
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
         "geometry_revision": info.geometry_revision,
@@ -316,6 +334,10 @@ def _write_manifest(outputs: list[OutputFile], info: SceneInfo, out_dir: Path, s
         "center_lat": info.center_lat,
         "center_lon": info.center_lon,
         "tile_size": size,
+        # Regla de reparto (como _write_tiles) para regenerar teselas desde el maestro editado
+        "tile_origin": tile_origin,
+        "compression": compression.value if compression else None,
+        "master": MASTER_GLB,
         "tiles": [
             {
                 "id": f"{o.tile[0]}_{o.tile[1]}" if o.tile else o.path.stem,

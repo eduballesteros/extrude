@@ -35,6 +35,26 @@ class MaterialPreset:
     def key(self) -> tuple[str, str]:
         return (self.id, self.version)
 
+    @property
+    def pieces(self) -> tuple[int, int] | None:
+        """Piezas (columnas, filas) dentro de un mosaico de textura; None si no hay piezas."""
+        from extrude.textures import PIECES
+
+        return PIECES.get(self.pattern) if self.pattern else None
+
+    @property
+    def piece_size_m(self) -> tuple[float, float] | None:
+        """Tamaño real de una pieza (ladrillo, losa, tabla) con el mosaico por defecto."""
+        pieces = self.pieces
+        if pieces is None:
+            return None
+        return (self.tile_size_m[0] / pieces[0], self.tile_size_m[1] / pieces[1])
+
+    def tile_for_piece(self, piece: tuple[float, float]) -> tuple[float, float]:
+        """Mosaico de textura que da piezas de `piece` metros (sin piezas: el propio valor)."""
+        pieces = self.pieces or (1, 1)
+        return (piece[0] * pieces[0], piece[1] * pieces[1])
+
 
 PRESETS: tuple[MaterialPreset, ...] = (
     MaterialPreset(

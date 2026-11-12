@@ -288,6 +288,8 @@ def build_glb(layers: Sequence[ExportLayer], info: SceneInfo) -> tuple[bytes, Gl
         extras: dict[str, Any] = {
             "layer": layer.name,
             "kind": layer.rule.kind.value,
+            # Altura de planta configurada: «sube dos plantas» no inventa la altura
+            "floor_height": layer.rule.floor_height if layer.rule.kind is Kind.BUILDING else None,
             "visible": layer.rule.visible,
             "source_entities": layer.source_entities,
         }

@@ -18,12 +18,20 @@ dependencies = [
 [project.scripts]
 extrude = "extrude.cli:app"
 
+[project.optional-dependencies]
+ai = [
+    "anthropic>=2.8.0",
+    "openai>=3.49.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.2",
     "ruff>=0.6",
     "mypy>=1.11",
     "types-pyyaml",
+    "anthropic>=2.8.0",
+    "openai>=3.49.0",
 ]
 
 [build-system]

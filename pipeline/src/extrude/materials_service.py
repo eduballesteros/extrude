@@ -12,17 +12,17 @@ Separado del manejador HTTP para probarlo sin red. Reglas (docs/REQUISITOS_MATER
 
 from __future__ import annotations
 
-import json
 import re
-import threading
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from extrude.errors import ExtrudeError
+from extrude.master import editable_base
 from extrude.material_library import DEFAULT_LIBRARY, MaterialLibrary
 from extrude.materiality import MaterialPlan, parse_plan, validate_plan
 from extrude.materialize import GlbData, check_base, glb_catalog, materialize
+from extrude.project_state import LOCK, ProjectState, write_atomic
 from extrude.textures import PATTERNS, texture
 
 BASE_GLB = "model.glb"
@@ -32,8 +32,6 @@ PLAN_FILE = "materials.json"
 HISTORY_DIR = "materials"
 REVISION = re.compile(r"^mat-(\d{3,})\.json$")
 MAX_PLAN_BYTES = 5 * 1024 * 1024
-
-_lock = threading.Lock()  # una materialización a la vez por proceso (CPU y archivos)
 
 
 class PlanRejected(ExtrudeError):  # noqa: N818 (mismo convenio que el resto de errores)
@@ -58,7 +56,9 @@ def library_payload(library: MaterialLibrary = DEFAULT_LIBRARY) -> dict[str, Any
                 "roughness": p.roughness,
                 "metalness": p.metalness,
                 "opacity": p.opacity,
-                "tileSizeM": list(p.tile_size_m),
+                "tileSizeM": list(p.tile_size_m),  # mosaico de textura completo (repetición)
+                "piecesPerTile": list(p.pieces) if p.pieces else None,
+                "pieceSizeM": [round(v, 4) for v in p.piece_size_m] if p.piece_size_m else None,
                 "texture": f"/api/library/{p.pattern}.png" if p.pattern else None,
             }
             for p in library.presets
@@ -87,12 +87,6 @@ def inspect_base(data: bytes) -> str:
     return revision
 
 
-def _write_atomic(path: Path, data: bytes) -> None:
-    partial = path.with_name(f"{path.name}.partial")
-    partial.write_bytes(data)
-    partial.replace(path)
-
-
 def _next_revision(history: Path) -> str:
     numbers = [int(m.group(1)) for p in history.glob("mat-*.json") if (m := REVISION.match(p.name))]
     return f"mat-{max(numbers, default=0) + 1:03d}"
@@ -108,17 +102,24 @@ def _parse(text: bytes) -> MaterialPlan:
     return parse_plan(decoded)
 
 
-def apply_plan(out_dir: Path, body: bytes, *, preview: bool) -> dict[str, Any]:
-    """Valida y aplica el plan al `model.glb` del trabajo. Devuelve qué archivos se escribieron."""
-    base_path = out_dir / BASE_GLB
-    if not base_path.is_file():
-        raise ExtrudeError(
-            "Este trabajo no tiene un GLB base único.",
-            "Los modelos teselados no se materializan en esta versión: convierte sin teselas.",
-        )
+def _project(out_dir: Path) -> ProjectState:
+    base = GlbData(editable_base(out_dir).read_bytes())
+    return ProjectState.load(out_dir, str(check_base(base.doc)["geometry_revision"]))
+
+
+def apply_plan(
+    out_dir: Path, body: bytes, *, preview: bool, expect: str | None = None
+) -> dict[str, Any]:
+    """Valida y aplica el plan al GLB base VIGENTE del proyecto (con sus ediciones geométricas).
+
+    Confirmar crea una revisión del proyecto (deshacer/rehacer, ver project_state.py)."""
+    editable_base(out_dir)  # maestro sin comprimir (comprimidos y teselados incluidos)
     plan = _parse(body)
-    with _lock:
-        base = base_path.read_bytes()
+    with LOCK:
+        state = _project(out_dir)
+        if expect is not None and not preview and state.current != expect:
+            raise StaleRevision(state.current, expect)
+        base = state.base_path().read_bytes()
         glb = GlbData(base)
         extras = check_base(glb.doc)
         catalog = glb_catalog(glb, str(extras["geometry_revision"]))
@@ -134,16 +135,21 @@ def apply_plan(out_dir: Path, body: bytes, *, preview: bool) -> dict[str, Any]:
             history.mkdir(exist_ok=True)
             plan = plan.model_copy(update={"material_revision": _next_revision(history)})
         data, stats = materialize(base, plan)
-        name = PREVIEW_GLB if preview else MATERIALIZED_GLB
         if preview:
-            _write_atomic(out_dir / name, data)
+            write_atomic(out_dir / PREVIEW_GLB, data)
+            name = PREVIEW_GLB
         else:
-            text = plan.to_json().encode("utf-8")
-            # Primero la copia inmutable; después GLB y plan vigentes. Si algo falla antes del
-            # último replace, el estado confirmado anterior sigue intacto y coherente.
-            (history / f"{plan.material_revision}.json").write_bytes(text)
-            _write_atomic(out_dir / name, data)
-            _write_atomic(out_dir / PLAN_FILE, text)
+            state.commit(
+                kind="materials",
+                summary=f"Materiales {plan.material_revision} "
+                f"({len(plan.assignments)} asignaciones)",
+                base_bytes=None,
+                geometry_revision=plan.geometry_revision,
+                plan_text=plan.to_json(),
+                material_revision=plan.material_revision,
+                materialized=data,
+            )
+            name = MATERIALIZED_GLB
     return {
         "preview": preview,
         "materialRevision": plan.material_revision,
@@ -151,12 +157,44 @@ def apply_plan(out_dir: Path, body: bytes, *, preview: bool) -> dict[str, Any]:
         "file": name,
         "plan": None if preview else PLAN_FILE,
         "stats": asdict(stats),
+        "revision": None if preview else state.current,
     }
 
 
-def confirmed_plan(out_dir: Path) -> dict[str, Any] | None:
-    path = out_dir / PLAN_FILE
-    if not path.is_file():
-        return None
-    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    return data
+class StaleRevision(ExtrudeError):  # noqa: N818
+    def __init__(self, current: str, expected: str) -> None:
+        super().__init__(
+            f"El proyecto está en {current}, no en {expected}: no se deshace nada.",
+            "Revisa el historial; otro cambio llegó después.",
+        )
+        self.current = current
+
+
+def project_status(out_dir: Path, job_id: str) -> dict[str, Any]:
+    with LOCK:
+        return _project(out_dir).public(job_id)
+
+
+def step(out_dir: Path, job_id: str, *, forward: bool, expect: str | None = None) -> dict[str, Any]:
+    """Deshacer (forward=False) o rehacer: publica otra revisión ya confirmada, sin IA.
+
+    Con `expect`, solo actúa si la revisión actual es esa (compensar una confirmación concreta
+    nunca deshace cambios posteriores de otra pestaña o usuario)."""
+    with LOCK:
+        state = _project(out_dir)
+        if expect is not None and state.current != expect:
+            raise StaleRevision(state.current, expect)
+        if forward:
+            target = state.redo_target()
+            state.redo.pop()
+        else:
+            target = state.undo_target()
+            state.redo.append(state.current)
+        materialized = None
+        text = state.plan_text(target)
+        if text is not None:
+            from extrude.materiality import parse_plan
+
+            materialized, _ = materialize(state.base_path(target).read_bytes(), parse_plan(text))
+        state.move(target.id, materialized)
+        return state.public(job_id)

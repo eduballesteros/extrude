@@ -126,6 +126,16 @@ def seams(rng: np.random.Generator, size: int) -> Image:
     return np.where(_joints(u, 2, 0.01) > 0, 1.0, base)
 
 
+# Piezas por mosaico (columnas, filas): `tile_size_m` es el mosaico de textura completo, no una
+# pieza. Un ladrillo de 25 × 6,7 cm sale de un mosaico de 2 × 2 m con 8 × 30 piezas.
+PIECES: dict[str, tuple[int, int]] = {
+    "brick": (8, 30),
+    "concrete": (1, 1),
+    "stone": (2, 2),
+    "wood": (1, 10),
+    "seams": (2, 1),
+}
+
 PATTERNS: dict[str, Callable[[np.random.Generator, int], Image]] = {
     "brick": brick,
     "concrete": concrete,
