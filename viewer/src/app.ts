@@ -15,6 +15,7 @@ import { loadHdri } from './scene/environment';
 import { misplacedLayers, misplacedMessage } from './scene/groundCheck';
 import { MeasureTool } from './scene/measure';
 import { Ground } from './scene/ground';
+import { ObjectHighlight } from './scene/highlight';
 import { LayerManager } from './scene/layers';
 import { SceneLighting } from './scene/lighting';
 import { ExtraLights, newLightState } from './scene/lights';
@@ -86,6 +87,13 @@ export class App {
   };
   /** Objeto pulsado en la vista 3D (ID persistente), para el panel de materiales. */
   selectedObjectId: string | null = null;
+  /** Cajas de los objetos afectados por una propuesta de materiales (no cambia el modelo). */
+  readonly highlight = new ObjectHighlight();
+  /**
+   * El modelo cargado es una previsualización de materiales sin confirmar: las exportaciones
+   * deben usar la revisión confirmada, así que se bloquean mientras dure.
+   */
+  materialPreview = false;
   private readonly raycaster = new Raycaster();
   private pointerDown = new Vector2();
   private lastFrame = performance.now();
@@ -126,6 +134,7 @@ export class App {
     container.append(this.info.element);
     this.measure = new MeasureTool(container, () => this.emit('state'));
     this.scene.add(this.measure.group);
+    this.scene.add(this.highlight.group);
 
     this.bindPointer();
     // Los paneles acoplados cambian el tamaño del visor sin redimensionar la ventana
@@ -192,6 +201,11 @@ export class App {
     this.emit('state');
   }
 
+  /** Resalta objetos por ID persistente; devuelve cuántos hay en el modelo. */
+  highlightObjects(ids: Iterable<string>): number {
+    return this.highlight.show(this.model?.root ?? null, ids);
+  }
+
   /** Activa o desactiva la regla: cursor de mirilla y clics para medir. */
   setMeasuring(active: boolean): void {
     if (active) {
@@ -227,6 +241,7 @@ export class App {
     const model = this.model;
     if (!model) return;
     this.measure.clear(); // los puntos eran del modelo anterior
+    this.highlight.clear();
     this.scene.remove(model.root);
     // El entorno (cielo/HDRI) es de SceneLighting y se reutiliza con el siguiente modelo
     const keep = new Set<Texture>();

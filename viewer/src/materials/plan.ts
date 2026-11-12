@@ -26,6 +26,23 @@ export interface Assignment {
   reason?: string;
 }
 
+/** Trazabilidad opcional de una propuesta de IA revisada (sin credenciales ni contexto). */
+export interface AiTrace {
+  provider: string;
+  model: string;
+  simulated?: boolean;
+  promptVersion: string;
+  summary: string;
+  explicitRequirements?: string[];
+  assumptions?: string[];
+  createdAt?: string;
+}
+
+export interface Omission {
+  text: string;
+  reason?: string;
+}
+
 export interface MaterialPlan {
   schemaVersion: 1;
   projectId: string;
@@ -33,7 +50,10 @@ export interface MaterialPlan {
   materialRevision: string;
   catalogVersion: string;
   assignments: Assignment[];
-  omissions: { text: string; reason?: string }[];
+  omissions: Omission[];
+  /** Descripción original (opcional: se puede borrar conservando las asignaciones, RS-10). */
+  description?: string;
+  ai?: AiTrace;
 }
 
 export const MAX_HISTORY = 50;
@@ -66,6 +86,11 @@ export class PlanEditor {
 
   get canRedo(): boolean {
     return this.redoStack.length > 0;
+  }
+
+  /** Asignaciones del último estado confirmado (copia). */
+  get confirmedAssignments(): Assignment[] {
+    return JSON.parse(this.confirmed) as Assignment[];
   }
 
   /** Hay cambios respecto al último estado confirmado. */
@@ -146,7 +171,10 @@ export class PlanEditor {
     this.commit(JSON.parse(this.confirmed) as Assignment[]);
   }
 
-  toPlan(meta: Omit<MaterialPlan, 'schemaVersion' | 'assignments' | 'omissions'>): MaterialPlan {
-    return { schemaVersion: 1, ...meta, assignments: clone(this.list), omissions: [] };
+  toPlan(
+    meta: Omit<MaterialPlan, 'schemaVersion' | 'assignments' | 'omissions'>,
+    omissions: Omission[] = [],
+  ): MaterialPlan {
+    return { schemaVersion: 1, ...meta, assignments: clone(this.list), omissions: [...omissions] };
   }
 }

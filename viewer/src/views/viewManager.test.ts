@@ -72,6 +72,19 @@ describe('ViewManager: cargas de vistas que llegan tarde', () => {
     expect(saved.map((v) => v.name)).toEqual(['Vista B renombrada']);
   });
 
+  it('recargar el mismo modelo (materiales, edición, deshacer) no relee ni repone vistas', async () => {
+    load.mockResolvedValueOnce([view('Vista A'), view('Atardecer')]);
+    const { app, open } = fakeApp();
+    const views = new ViewManager(app);
+    open('A.glb');
+    await flush();
+    views.remove(views.views[1]!.id); // deshacer una vista creada por la IA
+    open('A.glb'); // recarga del GLB editado o materializado
+    await flush();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(views.views.map((v) => v.name)).toEqual(['Vista A']);
+  });
+
   it('abrir dos veces el mismo modelo: solo cuenta la última carga', async () => {
     const first = deferred<SceneView[]>();
     const second = deferred<SceneView[]>();

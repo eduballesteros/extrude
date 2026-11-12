@@ -1,6 +1,7 @@
 /**
- * Pestaña Materiales (Fase 2, docs/REQUISITOS_MATERIALIDAD_IA.md): asignación manual por objeto y
- * superficie, previsualización, deshacer y confirmación, sin IA.
+ * Pestaña Materiales (Fases 2 y 3, docs/REQUISITOS_MATERIALIDAD_IA.md): descripción con IA
+ * opcional (ver editSection.ts), asignación manual por objeto y superficie, previsualización,
+ * deshacer y confirmación. Ambos caminos producen el mismo plan y usan el mismo motor.
  *
  * La materialización la hace siempre `extrude serve` con el mismo código que la CLI, así que lo
  * que se ve aquí es exactamente lo que se exporta. La previsualización recarga el GLB del servidor
@@ -23,8 +24,24 @@ import {
   type LibraryMaterial,
   type PlanIssue,
 } from '../materials/client';
-import { PlanEditor, type Assignment, type MaterialPlan } from '../materials/plan';
+import type { ProjectStatus } from '../materials/ai';
+import type { ViewsTarget } from '../materials/viewerOps';
+import {
+  PlanEditor,
+  type AiTrace,
+  type Assignment,
+  type MaterialPlan,
+  type Omission,
+} from '../materials/plan';
+import { EditSection } from './editSection';
 import { button, h, pickFile, section } from './dom';
+
+/** Metadatos del plan que no son asignaciones: descripción, trazabilidad de IA y omisiones. */
+interface PlanMeta {
+  description?: string;
+  ai?: AiTrace;
+  omissions: Omission[];
+}
 
 const STORAGE_PREFIX = 'extrude.materials.';
 const SUMMARY_LABELS = 3;
@@ -33,6 +50,8 @@ type Mode = 'idle' | 'busy';
 
 export interface MaterialsPanelOptions {
   server: string;
+  /** Vistas del visor (las herramientas de IA crean vistas y cambian el sol). */
+  views: ViewsTarget;
   /** Lanza si el usuario no ha permitido enviar archivos a ese servidor. */
   authorizeUpload: () => void;
 }
@@ -86,6 +105,11 @@ export class MaterialsPanel {
   private mode: Mode = 'idle';
   private issues: PlanIssue[] = [];
   private downloads: { label: string; href: string; filename: string }[] = [];
+  private meta: PlanMeta = { omissions: [] };
+  private confirmedMeta: PlanMeta = { omissions: [] };
+  private readonly ai: EditSection;
+  private readonly pieceLabel = h('span', { class: 'field-label', textContent: 'Pieza (m)' });
+  private readonly descriptionInfo = h('div', { class: 'ai-plan-description' });
 
   private readonly status = h('div', { class: 'mat-status', attrs: { role: 'status' } });
   private readonly search = h('input', {
@@ -143,6 +167,35 @@ export class MaterialsPanel {
     private readonly options: MaterialsPanelOptions,
   ) {
     this.client = new MaterialsClient(options.server);
+    this.ai = new EditSection(
+      {
+        app,
+        views: options.views,
+        catalog: () => this.catalog,
+        selected: () => this.selected,
+        mark: (ids) => {
+          ids.forEach((id) => this.selected.add(id));
+          this.render();
+        },
+        usable: () => this.usable,
+        manualDirty: () => this.editor.dirty,
+        library: () => this.library,
+        ensureJob: () => this.ensureJob(),
+        showPreview: async (url) => {
+          this.clearLayerColors();
+          await this.reload(url);
+          this.previewing = true;
+          this.render();
+        },
+        discardPreview: async () => {
+          if (this.confirmedUrl) await this.reload(this.confirmedUrl);
+          this.previewing = false;
+          this.render();
+        },
+        applyProject: (status, plan) => this.applyProject(status, plan),
+      },
+      options.server,
+    );
 
     const objects = section('Objetos', true, this.selectionInfo);
     objects.body.append(
@@ -186,7 +239,7 @@ export class MaterialsPanel {
       this.field('Material', this.materialSelect),
       this.field('Color', this.colorInput),
       this.field('Rugosidad', this.roughnessInput),
-      this.field('Pieza (m)', tile),
+      h('label', { class: 'field' }, this.pieceLabel, tile),
       this.field('Giro (°)', this.rotationInput),
       h(
         'div',
@@ -203,6 +256,7 @@ export class MaterialsPanel {
     const assignments = section('Asignaciones');
     assignments.body.append(
       h('div', { class: 'mat-row-actions' }, this.undoButton, this.redoButton),
+      this.descriptionInfo,
       this.assignmentList,
       this.issueList,
       h(
@@ -227,6 +281,7 @@ export class MaterialsPanel {
 
     this.element.append(
       this.status,
+      this.ai.element,
       objects.element,
       assign.element,
       assignments.element,
@@ -274,7 +329,33 @@ export class MaterialsPanel {
   setJob(job: string | null, baseUrl: string | null): void {
     this.job = job;
     this.confirmedUrl = baseUrl;
-    if (job) void this.loadConfirmed(job);
+    if (job) {
+      void this.loadConfirmed(job);
+      void this.ai.setJob(job);
+    }
+    this.render();
+  }
+
+  /** Estado del proyecto tras confirmar, deshacer o rehacer: modelo, plan y revisión. */
+  private async applyProject(
+    status: ProjectStatus,
+    plan: MaterialPlan | null | undefined,
+  ): Promise<void> {
+    this.previewing = false;
+    this.confirmedUrl = status.modelUrl;
+    this.confirmedRevision = status.materialRevision;
+    this.clearLayerColors();
+    await this.reload(status.modelUrl);
+    const current =
+      plan === undefined && this.job ? await this.client.confirmedPlan(this.job) : plan;
+    const confirmed = status.materialRevision ? (current ?? null) : null;
+    this.confirmedMeta = {
+      ...(confirmed?.description ? { description: confirmed.description } : {}),
+      ...(confirmed?.ai ? { ai: confirmed.ai } : {}),
+      omissions: confirmed?.omissions ?? [],
+    };
+    this.meta = { ...this.confirmedMeta };
+    this.editor.setConfirmed(confirmed?.assignments ?? [], true);
     this.render();
   }
 
@@ -285,6 +366,8 @@ export class MaterialsPanel {
       this.catalog = this.app.model
         ? buildCatalog(this.app.model.root)
         : new Map<string, CatalogObject>();
+      // Una edición geométrica cambia la revisión (alturas, copias, posiciones)
+      this.geometryRevision = this.app.model?.extras?.geometry_revision ?? this.geometryRevision;
       this.render();
       return;
     }
@@ -295,6 +378,9 @@ export class MaterialsPanel {
     this.previewing = false;
     this.selected.clear();
     this.downloads = [];
+    this.meta = { omissions: [] };
+    this.confirmedMeta = { omissions: [] };
+    this.ai.reset();
     this.catalog = model ? buildCatalog(model.root) : new Map<string, CatalogObject>();
     this.geometryRevision = model?.extras?.geometry_revision ?? null;
     const draft = this.geometryRevision ? storageGet(STORAGE_PREFIX + this.geometryRevision) : null;
@@ -307,6 +393,7 @@ export class MaterialsPanel {
       }
     }
     if (model && !this.library) void this.loadLibrary();
+    if (model) void this.ai.loadProviders().then(() => this.render());
     this.render();
   }
 
@@ -324,6 +411,12 @@ export class MaterialsPanel {
     const plan = await this.client.confirmedPlan(job);
     if (!plan || job !== this.job) return;
     this.confirmedRevision = plan.materialRevision;
+    this.confirmedMeta = {
+      ...(plan.description ? { description: plan.description } : {}),
+      ...(plan.ai ? { ai: plan.ai } : {}),
+      omissions: plan.omissions ?? [],
+    };
+    if (!this.editor.dirty) this.meta = { ...this.confirmedMeta };
     this.editor.setConfirmed(plan.assignments, !this.editor.dirty);
   }
 
@@ -423,9 +516,18 @@ export class MaterialsPanel {
     if (!preset) return;
     this.colorInput.value = preset.color;
     this.roughnessInput.value = String(preset.roughness);
-    this.tileWidth.value = String(preset.tileSizeM[0]);
-    this.tileHeight.value = String(preset.tileSizeM[1]);
+    // El campo edita el tamaño real de una pieza (ladrillo, losa); sin piezas, la repetición
+    const piece = preset.pieceSizeM ?? preset.tileSizeM;
+    this.pieceLabel.textContent = preset.pieceSizeM ? 'Pieza (m)' : 'Repetición (m)';
+    this.tileWidth.value = String(Number(piece[0].toFixed(3)));
+    this.tileHeight.value = String(Number(piece[1].toFixed(3)));
     this.rotationInput.value = '0';
+  }
+
+  private pieceText(materialId: string, tile: [number, number]): string {
+    const pieces = this.preset(materialId)?.piecesPerTile;
+    if (!pieces) return `repetición ${tile.map((v) => v.toFixed(2)).join('×')} m`;
+    return `pieza ${(tile[0] / pieces[0]).toFixed(3)}×${(tile[1] / pieces[1]).toFixed(3)} m`;
   }
 
   private fillSurfaces(): void {
@@ -478,8 +580,16 @@ export class MaterialsPanel {
       parameters.color = this.colorInput.value;
     }
     if (roughness !== preset.roughness) parameters.roughness = roughness;
-    if (width !== preset.tileSizeM[0] || height !== preset.tileSizeM[1]) {
-      parameters.tileSizeM = [width, height];
+    const pieces = preset.piecesPerTile ?? [1, 1];
+    const tile: [number, number] = [
+      Math.min(width * pieces[0], 100),
+      Math.min(height * pieces[1], 100),
+    ];
+    if (
+      Math.abs(tile[0] - preset.tileSizeM[0]) > 1e-3 ||
+      Math.abs(tile[1] - preset.tileSizeM[1]) > 1e-3
+    ) {
+      parameters.tileSizeM = tile; // el plan guarda el mosaico; la pieza es tile / piezas
     }
     if (rotation !== 0) parameters.rotationDeg = rotation;
     const skipped = this.selected.size - ids.length;
@@ -508,7 +618,7 @@ export class MaterialsPanel {
         const color = a.parameters.color ?? preset?.color ?? '#cccccc';
         const labels = a.objectIds.map((id) => this.catalog.get(id)?.label ?? id);
         const extras = [
-          a.parameters.tileSizeM ? `${a.parameters.tileSizeM.join('×')} m` : null,
+          a.parameters.tileSizeM ? this.pieceText(a.materialId, a.parameters.tileSizeM) : null,
           a.parameters.rotationDeg ? `${a.parameters.rotationDeg}°` : null,
           a.parameters.roughness !== undefined ? `R ${a.parameters.roughness}` : null,
         ].filter(Boolean);
@@ -575,12 +685,42 @@ export class MaterialsPanel {
   }
 
   private plan(): MaterialPlan {
-    return this.editor.toPlan({
-      projectId: 'visor',
-      geometryRevision: this.geometryRevision ?? '',
-      materialRevision: this.confirmedRevision ?? 'mat-000',
-      catalogVersion: this.library?.version ?? '',
-    });
+    return this.editor.toPlan(
+      {
+        projectId: 'visor',
+        geometryRevision: this.geometryRevision ?? '',
+        materialRevision: this.confirmedRevision ?? 'mat-000',
+        catalogVersion: this.library?.version ?? '',
+        ...(this.meta.description ? { description: this.meta.description.slice(0, 10_000) } : {}),
+        ...(this.meta.ai ? { ai: this.meta.ai } : {}),
+      },
+      this.meta.omissions.slice(0, 200),
+    );
+  }
+
+  /** Hay cambios en descripción, trazabilidad u omisiones respecto a lo confirmado. */
+  private get metaDirty(): boolean {
+    return JSON.stringify(this.meta) !== JSON.stringify(this.confirmedMeta);
+  }
+
+  private get usable(): boolean {
+    return (
+      Boolean(this.app.model && this.library && this.geometryRevision && this.catalog.size) &&
+      !(this.materialized && !this.job)
+    );
+  }
+
+  /** RS-10: quitar el texto original del plan conservando asignaciones y trazabilidad. */
+  private removeDescription(): void {
+    if (!this.meta.description) return;
+    const rest: PlanMeta = { ...this.meta };
+    delete rest.description;
+    this.meta = rest;
+    this.app.notify(
+      'La descripción se quitará del plan al confirmar; las asignaciones se conservan.',
+      'info',
+    );
+    this.render();
   }
 
   private async reload(url: string): Promise<void> {
@@ -615,7 +755,7 @@ export class MaterialsPanel {
     this.render();
     try {
       const job = await this.ensureJob();
-      const result = await this.client.applyPlan(job, this.plan(), preview);
+      const result = await this.client.applyPlan(job, this.plan(), preview, this.ai.revision);
       this.clearLayerColors();
       await this.reload(result.url);
       if (preview) {
@@ -628,6 +768,8 @@ export class MaterialsPanel {
         this.previewing = false;
         this.confirmedUrl = result.url;
         this.confirmedRevision = result.materialRevision;
+        void this.ai.refreshProject(); // confirmar a mano también crea una revisión
+        this.confirmedMeta = { ...this.meta };
         this.editor.setConfirmed(this.editor.assignments as Assignment[]);
         const base = (this.app.model?.name ?? 'modelo').replace(/\.glb$/i, '');
         this.downloads = [
@@ -666,6 +808,7 @@ export class MaterialsPanel {
     this.render();
     try {
       if (this.editor.dirty) this.editor.revert();
+      this.meta = { ...this.confirmedMeta };
       if (this.previewing && this.confirmedUrl) await this.reload(this.confirmedUrl);
       this.previewing = false;
       this.issues = [];
@@ -698,6 +841,11 @@ export class MaterialsPanel {
         );
       }
       const known = plan.assignments.filter((a) => a.objectIds.every((id) => this.catalog.has(id)));
+      this.meta = {
+        ...(typeof plan.description === 'string' ? { description: plan.description } : {}),
+        ...(plan.ai ? { ai: plan.ai } : {}),
+        omissions: Array.isArray(plan.omissions) ? plan.omissions : [],
+      };
       this.editor.replace(plan.assignments);
       if (known.length < plan.assignments.length) {
         this.app.notify(
@@ -727,23 +875,58 @@ export class MaterialsPanel {
       ? `Confirmado ${this.confirmedRevision}`
       : 'Sin confirmar';
     if (this.previewing) return `Previsualizando · ${confirmed}`;
-    return this.editor.dirty ? `${confirmed} · cambios pendientes` : confirmed;
+    return this.editor.dirty || this.metaDirty ? `${confirmed} · cambios pendientes` : confirmed;
+  }
+
+  private renderDescription(): void {
+    const { description, ai } = this.meta;
+    if (!description && !ai) {
+      this.descriptionInfo.replaceChildren();
+      return;
+    }
+    const parts: (HTMLElement | null)[] = [
+      ai
+        ? h('p', {
+            class: 'ai-note',
+            textContent: `Propuesta revisada de ${ai.provider} (${ai.model}): ${ai.summary}`,
+          })
+        : null,
+      description
+        ? h(
+            'div',
+            { class: 'mat-row-actions' },
+            h('span', {
+              class: 'ai-note',
+              textContent: 'El plan guarda tu descripción original.',
+            }),
+            button({
+              label: 'Quitar descripción',
+              variant: 'ghost',
+              size: 'sm',
+              onClick: () => this.removeDescription(),
+            }),
+          )
+        : null,
+    ];
+    this.descriptionInfo.replaceChildren(...parts.filter((n): n is HTMLElement => n !== null));
   }
 
   render(): void {
     this.status.textContent = this.statusText();
-    const usable =
-      Boolean(this.app.model && this.library && this.geometryRevision && this.catalog.size) &&
-      !(this.materialized && !this.job);
+    const usable = this.usable;
     const busy = this.mode === 'busy';
+    const dirty = this.editor.dirty || this.metaDirty;
+    this.app.materialPreview = this.previewing;
     this.fillSurfaces();
     this.renderObjects();
     this.renderAssignments();
     this.undoButton.disabled = !this.editor.canUndo || busy;
     this.redoButton.disabled = !this.editor.canRedo || busy;
     this.previewButton.disabled = !usable || busy || !this.editor.assignments.length;
-    this.confirmButton.disabled = !usable || busy || (!this.editor.dirty && !this.previewing);
-    this.discardButton.disabled = busy || (!this.editor.dirty && !this.previewing);
+    this.confirmButton.disabled = !usable || busy || (!dirty && !this.previewing);
+    this.discardButton.disabled = busy || (!dirty && !this.previewing);
+    this.renderDescription();
+    this.ai.render();
     this.downloadList.replaceChildren(
       ...this.downloads.map((d) =>
         h('a', {

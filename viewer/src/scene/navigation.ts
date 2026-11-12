@@ -173,6 +173,28 @@ export class Navigation {
     this.animateTo(target.clone().addScaledVector(direction, this.distance), target);
   }
 
+  /**
+   * Cámara final (sin animar) para una vista estándar: dirección del preset y, si se da `box`,
+   * encuadre de esa caja; si no, el objetivo y la distancia actuales. Sirve para guardar vistas
+   * con exactamente lo pedido, sin depender de que termine una animación.
+   */
+  presetCamera(preset: ViewPreset, box?: Box3): CameraState {
+    const direction = new Vector3(...PRESET_DIRECTIONS[preset]).normalize();
+    const current = this.snapshot();
+    let target = this.orbit.target.clone();
+    let distance = this.distance;
+    let orthoSize = current.orthoSize;
+    if (box && !box.isEmpty()) {
+      const sphere = box.getBoundingSphere(new Sphere());
+      target = sphere.center.clone();
+      distance =
+        (sphere.radius * FIT_MARGIN) / Math.sin((this.perspective.fov * MathUtils.DEG2RAD) / 2);
+      orthoSize = sphere.radius * FIT_MARGIN;
+    }
+    const position = target.clone().addScaledVector(direction, distance);
+    return { ...current, position: position.toArray(), target: target.toArray(), orthoSize };
+  }
+
   /** Igual que `focus`, pero hacia una posición y objetivo concretos (restaurar vistas). */
   animateTo(position: Vector3, target: Vector3): void {
     this.tween = {

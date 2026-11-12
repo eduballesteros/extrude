@@ -111,7 +111,15 @@ export function buildCatalog(root: Object3D): Map<string, CatalogObject> {
           const id: unknown = ids[part];
           const key = SURFACE_KEYS[code];
           if (typeof id !== 'string' || !key) continue;
-          const label = `${String(block['block'])} #${n + 1}`;
+          // Etiqueta única por pieza cuando cada copia tiene varias (igual que el servidor)
+          const perInstance = Number(block['objects_per_instance'] ?? 1);
+          // Número estable de la copia (`numbers`): no se renumera al quitar o independizar otra
+          const numbers = block['numbers'];
+          const num =
+            Array.isArray(numbers) && numbers.length === instances.length
+              ? Number(numbers[n])
+              : n + 1;
+          const label = `${String(block['block'])} #${num}${perInstance > 1 ? `.${part + 1}` : ''}`;
           entry(catalog, id, label, layer, kind).surfaces.add(key);
         }
       });

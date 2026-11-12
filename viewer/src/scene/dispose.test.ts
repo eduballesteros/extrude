@@ -76,6 +76,7 @@ describe('App.releaseModel (usado por setModel y unload)', () => {
         bytes: new ArrayBuffer(0),
       } as LoadedModel,
       measure: { clear: vi.fn() }, // los puntos medidos eran del modelo anterior
+      highlight: { clear: vi.fn() }, // las cajas de una propuesta eran del modelo anterior
     };
     const geometrySpy = spyDispose(previous.geometry);
     const materialSpy = spyDispose(previous.material);
@@ -89,5 +90,6 @@ describe('App.releaseModel (usado por setModel y unload)', () => {
     expect(scene.children).not.toContain(previous.root);
     expect(host.model).toBeNull();
     expect(host.measure.clear).toHaveBeenCalledOnce();
+    expect(host.highlight.clear).toHaveBeenCalledOnce();
   });
 });

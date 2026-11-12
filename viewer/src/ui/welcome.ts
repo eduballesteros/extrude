@@ -226,6 +226,37 @@ export class WelcomeScreen {
         h(
           'div',
           { class: 'welcome-body' },
+          h(
+            'a',
+            {
+              class: 'welcome-guide',
+              href: new URL('guia.html', document.baseURI).toString(),
+              target: '_blank',
+              rel: 'noopener',
+              attrs: { 'aria-label': 'Guía de uso de Extrude (se abre en otra pestaña)' },
+            },
+            h(
+              'span',
+              { class: 'welcome-guide-icon', attrs: { 'aria-hidden': 'true' } },
+              icon('book', 26),
+            ),
+            h(
+              'span',
+              { class: 'welcome-guide-content' },
+              h('span', { class: 'welcome-guide-label', textContent: 'Primeros pasos' }),
+              h('span', { class: 'welcome-guide-title', textContent: 'Guía de uso de Extrude' }),
+              h('span', {
+                class: 'welcome-guide-description',
+                textContent: 'Prepara tu plano, edita el modelo y aprende a exportar tus vistas.',
+              }),
+              h(
+                'span',
+                { class: 'welcome-guide-action' },
+                'Abrir la guía',
+                h('span', { textContent: '↗', attrs: { 'aria-hidden': 'true' } }),
+              ),
+            ),
+          ),
           this.dropzone,
           destinationInfo,
           this.progress,

@@ -75,6 +75,7 @@ describe('manifest.json', () => {
     ['tile_size', Infinity],
     ['center_lat', 91],
     ['center_lon', NaN],
+    ['geometry_revision', 'wrong-revision'],
   ])('rechaza el campo global %s inválido', (field, value) => {
     expect(() => parseManifest({ ...manifest(), [field]: value })).toThrow(String(field));
   });
@@ -127,6 +128,12 @@ describe('manifest.json', () => {
     expect(extras).toMatchObject({ crs: 'EPSG:25830', center_lat: 37.3676, center_lon: -6.0485 });
   });
 
+  it('conserva la identidad geométrica del manifest para habilitar la edición del proyecto', () => {
+    const revision = `sha256:${'a'.repeat(64)}`;
+    const extras = manifestExtras(parseManifest(manifest({ geometry_revision: revision })));
+    expect(extras.geometry_revision).toBe(revision);
+  });
+
   it('reconoce URLs de manifest', () => {
     expect(isManifestUrl('http://127.0.0.1:8765/api/jobs/abc/manifest.json')).toBe(true);
     expect(isManifestUrl('/out/manifest.json?v=2')).toBe(true);
@@ -140,7 +147,9 @@ describe('loadFromManifest', () => {
 
   it('descarga las teselas relativas al manifest y agrupa sus raíces con capas unificadas', async () => {
     const bodies: Record<string, ArrayBuffer | string> = {
-      [`${base}manifest.json`]: JSON.stringify(manifest()),
+      [`${base}manifest.json`]: JSON.stringify(
+        manifest({ geometry_revision: `sha256:${'b'.repeat(64)}` }),
+      ),
       [`${base}tiles/tile_0_0.glb`]: tileGlb({ EDIFICIOS: 12 }),
       [`${base}tiles/tile_1_0.glb`]: tileGlb({ EDIFICIOS: 20, VIALES: 10 }),
     };
@@ -161,6 +170,7 @@ describe('loadFromManifest', () => {
     expect(model.tiles).toBe(2);
     expect(model.bytes).toBeNull();
     expect(model.extras?.crs).toBe('EPSG:25830');
+    expect(model.extras?.geometry_revision).toBe(`sha256:${'b'.repeat(64)}`);
     expect(model.root.children.map((c: Object3D) => c.name)).toEqual(['0_0', '1_0']);
     expect(stages).toContain('download');
     expect(stages).toContain('parse');

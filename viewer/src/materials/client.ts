@@ -12,7 +12,12 @@ export interface LibraryMaterial {
   roughness: number;
   metalness: number;
   opacity: number;
+  /** Mosaico de textura completo (lo que repite), no una pieza. */
   tileSizeM: [number, number];
+  /** Piezas (columnas, filas) dentro del mosaico; null si el material no tiene piezas. */
+  piecesPerTile: [number, number] | null;
+  /** Tamaño real de una pieza (ladrillo, losa, tabla) con el mosaico por defecto. */
+  pieceSizeM: [number, number] | null;
   /** Ruta del servidor de la textura (PNG), o null si el material no lleva textura. */
   texture: string | null;
 }
@@ -30,6 +35,7 @@ export interface PlanIssue {
 
 export interface ApplyResult {
   preview: boolean;
+  revision: string | null;
   materialRevision: string;
   geometryRevision: string;
   url: string;
@@ -96,8 +102,15 @@ export class MaterialsClient {
     return created.job;
   }
 
-  applyPlan(job: string, plan: MaterialPlan, preview: boolean): Promise<ApplyResult> {
-    return this.call<ApplyResult>(`/api/jobs/${job}/materials${preview ? '?preview=1' : ''}`, {
+  /** `base`: revisión sobre la que se confirma (en un servidor compartido es obligatoria). */
+  applyPlan(
+    job: string,
+    plan: MaterialPlan,
+    preview: boolean,
+    base: string | null = null,
+  ): Promise<ApplyResult> {
+    const query = preview ? '?preview=1' : base ? `?base=${encodeURIComponent(base)}` : '';
+    return this.call<ApplyResult>(`/api/jobs/${job}/materials${query}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(plan),

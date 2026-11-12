@@ -1,4 +1,6 @@
 import './styles.css';
+import { installSessionFetch, onAuthRequired, sessionInfo } from './auth/session';
+import { LoginDialog } from './ui/login';
 import { App } from './app';
 import {
   CONFIG_EXTENSIONS,
@@ -44,6 +46,18 @@ const params = new URLSearchParams(window.location.search);
 const configuredServer = import.meta.env['VITE_EXTRUDE_SERVER'] as string | undefined;
 const destination = new ConversionDestination(params.get('server'), configuredServer);
 const client = new ConversionClient(destination.server, () => destination.assertUploadAllowed());
+// Servidor compartido: la sesión acompaña a toda petición al servidor (también las de three.js)
+installSessionFetch(destination.server);
+const loginDialog = new LoginDialog(destination.server);
+onAuthRequired(() => {
+  void loginDialog.ask().then((user) => app.notify(`Sesión iniciada como ${user}.`, 'info'));
+});
+void sessionInfo(destination.server)
+  .then((info) => {
+    if (info.mode === 'shared' && !info.user) return loginDialog.ask();
+    return null;
+  })
+  .catch(() => undefined); // servidor apagado: el visor sigue funcionando sin él
 let configYaml: { name: string; text: string } | null = null;
 /** ?tiles=500: los planos se convierten en teselas de 500 m (tiles/ + manifest.json). */
 const tileSize = Number(params.get('tiles')) || undefined;
@@ -59,6 +73,7 @@ const viewsPanel = new ViewsPanel(app, views, frame);
 const layersPanel = new LayersPanel(app);
 const materialsPanel = new MaterialsPanel(app, {
   server: destination.server,
+  views,
   authorizeUpload: () => destination.assertUploadAllowed(),
 });
 const left = new Sidebar('left', [
@@ -143,11 +158,25 @@ async function convertDrawing(
   const tiled = converted.kind === 'tiles';
   const href = client.url(converted.url);
   const model = await app.load(href, tiled ? base : `${base}.glb`, progress, signal);
-  if (!tiled) materialsPanel.setJob(result.job, converted.url);
+  // Teselado: se edita el maestro sin comprimir; cada revisión regenera teselas y manifest
+  const editable = tiled ? `/api/jobs/${result.job}/model.master.glb` : converted.url;
+  materialsPanel.setJob(result.job, editable);
+  const exportUrl = (method: string): string =>
+    client.url(`/api/jobs/${result.job}/export/${method}`);
   topbar.setDownloads([
     tiled
       ? { label: 'Manifest de teselas', href, filename: `${base}_manifest.json` }
       : { label: 'GLB convertido', href, filename: `${base}.glb` },
+    {
+      label: 'GLB actual comprimido (Meshopt)',
+      href: exportUrl('meshopt'),
+      filename: `${base}.meshopt.glb`,
+    },
+    {
+      label: 'GLB actual comprimido (Draco)',
+      href: exportUrl('draco'),
+      filename: `${base}.draco.glb`,
+    },
     {
       label: 'Informe de conversión',
       href: client.url(result.files.report_md),

@@ -1,0 +1,1303 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#e2e3de" />
+    <meta
+      name="description"
+      content="Guía de uso de Extrude: de plano DWG/DXF a modelo 3D, materiales y edición con IA"
+    />
+    <title>Guía de uso · Extrude</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <script>
+      // Mismo tema que el visor (clave compartida), antes de pintar
+      (function () {
+        var theme = 'light';
+        try {
+          var saved = localStorage.getItem('extrude-theme');
+          if (saved === 'light' || saved === 'dark') theme = saved;
+          else if (matchMedia('(prefers-color-scheme: dark)').matches) theme = 'dark';
+        } catch (e) {}
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+  </head>
+  <body class="guide">
+    <a class="g-skip" href="#contenido">Saltar al contenido</a>
+    <header class="g-top">
+      <a class="g-brand" href="./">
+        <img src="/favicon.svg" alt="" width="26" height="26" />
+        <span>Extrude</span>
+        <span class="g-brand-sub">Guía de uso</span>
+      </a>
+      <nav class="g-top-actions">
+        <button
+          class="g-btn g-btn-ghost"
+          id="g-theme"
+          type="button"
+          aria-label="Cambiar tema claro u oscuro"
+        >
+          Tema
+        </button>
+        <a class="g-btn g-btn-primary" href="./">Abrir el visor</a>
+      </nav>
+    </header>
+
+    <section class="g-hero">
+      <p class="g-eyebrow">Guía completa</p>
+      <h1>De plano DWG/DXF a modelo 3D, paso a paso</h1>
+      <p class="g-lead">
+        Convierte planos urbanos en modelos 3D, estudia el sol, guarda vistas, asigna materiales,
+        edita el proyecto con lenguaje natural y exporta a Blender. Si es tu primera vez, sigue los
+        apartados 1 a 4; el resto sirve de consulta.
+      </p>
+      <nav class="g-start" aria-label="Elige por dónde empezar">
+        <a class="g-start-card" href="#primer-recorrido">
+          <span class="g-card-label">Quiero probarlo</span>
+          <strong>Abre un ejemplo</strong>
+          <span>Conoce el visor, el sol y las vistas sin preparar un plano.</span>
+        </a>
+        <a class="g-start-card" href="#preparar">
+          <span class="g-card-label">Tengo un DWG o DXF</span>
+          <strong>Prepara tu proyecto</strong>
+          <span>Revisa unidades, alturas y configuración antes de convertir.</span>
+        </a>
+        <a class="g-start-card" href="#ia">
+          <span class="g-card-label">Ya tengo un modelo</span>
+          <strong>Edita y presenta</strong>
+          <span>Consulta materiales, cambios con IA y exportación.</span>
+        </a>
+      </nav>
+      <ol class="g-flow" aria-label="Flujo de trabajo">
+        <li><strong>Plano</strong><span>DWG / DXF</span></li>
+        <li><strong>Configuración</strong><span>YAML por proyecto</span></li>
+        <li><strong>Conversión</strong><span>GLB + informe</span></li>
+        <li><strong>Visor</strong><span>sol, capas, vistas</span></li>
+        <li><strong>Materiales e IA</strong><span>revisiones</span></li>
+        <li><strong>Exportar</strong><span>PNG, GLB, Blender</span></li>
+      </ol>
+    </section>
+
+    <div class="g-layout">
+      <aside class="g-toc" aria-label="Índice">
+        <div class="g-search" role="search" aria-label="Buscar en la guía">
+          <label for="g-search">¿Qué necesitas hacer?</label>
+          <input
+            id="g-search"
+            type="search"
+            placeholder="Alturas, materiales, Blender…"
+            aria-controls="g-search-results"
+            autocomplete="off"
+            maxlength="120"
+          />
+          <p id="g-search-status" class="g-search-status" role="status" aria-live="polite"></p>
+          <ul id="g-search-results" class="g-search-results" hidden></ul>
+        </div>
+        <p class="g-toc-title">Contenido</p>
+        <ol>
+          <li><a href="#instalar">Instalar y arrancar</a></li>
+          <li><a href="#primer-recorrido">Primer recorrido</a></li>
+          <li><a href="#preparar">Preparar tu plano</a></li>
+          <li><a href="#convertir">Convertir</a></li>
+          <li><a href="#visor">El visor</a></li>
+          <li><a href="#vistas">Vistas y exportación</a></li>
+          <li><a href="#materiales">Materiales</a></li>
+          <li><a href="#ia">Editar con IA</a></li>
+          <li><a href="#revisiones">Revisiones y archivos</a></li>
+          <li><a href="#comandos">Comandos</a></li>
+          <li><a href="#problemas">Solución de problemas</a></li>
+          <li><a href="#limitaciones">Compatibilidad y límites</a></li>
+          <li><a href="#glosario">Glosario</a></li>
+        </ol>
+      </aside>
+
+      <main class="g-content" id="contenido" tabindex="-1">
+        <!-- 1 ------------------------------------------------------------------------------ -->
+        <section id="instalar">
+          <h2><span class="g-num">1</span>Instalar y arrancar</h2>
+          <h3>Requisitos</h3>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Herramienta</th>
+                  <th>Versión</th>
+                  <th>Para qué</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Python</td>
+                  <td>3.12 o superior</td>
+                  <td>Conversor (<code>pipeline/</code>)</td>
+                </tr>
+                <tr>
+                  <td>uv</td>
+                  <td>0.4 o superior</td>
+                  <td>Entorno y dependencias de Python</td>
+                </tr>
+                <tr>
+                  <td>Node.js</td>
+                  <td>22.12 o superior</td>
+                  <td>Visor y herramientas glTF</td>
+                </tr>
+                <tr>
+                  <td>just</td>
+                  <td>1.38 o superior</td>
+                  <td>Atajos de comandos (opcional)</td>
+                </tr>
+                <tr>
+                  <td>ODA File Converter o LibreDWG</td>
+                  <td>—</td>
+                  <td>Solo para abrir <code>.dwg</code>; sin ellos, usa <code>.dxf</code></td>
+                </tr>
+                <tr>
+                  <td>Blender</td>
+                  <td>4.2 o superior</td>
+                  <td>Opcional: render con cámaras y luces</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="g-callout">
+            <strong>DWG necesita un conversor.</strong> El recomendado es ODA File Converter
+            (gratuito con registro); también sirve LibreDWG (<code>dwg2dxf</code>). Si están en otra
+            ruta, indícala con <code>EXTRUDE_ODA_PATH</code> o <code>EXTRUDE_DWG2DXF_PATH</code>.
+            <code>just doctor</code> te dice cuál detecta. Alternativa: en el CAD,
+            <em>Guardar como</em> → DXF 2018.
+          </div>
+
+          <h3>Instalación</h3>
+          <pre><code>just setup</code></pre>
+          <p>Sin <code>just</code>:</p>
+          <pre><code>uv sync --project pipeline
+npm ci --prefix viewer
+npm ci --prefix tools</code></pre>
+
+          <h3>Arranque</h3>
+          <div class="g-grid-2">
+            <div class="g-card">
+              <p class="g-card-label">Terminal 1</p>
+              <pre><code>just serve</code></pre>
+              <p>Servidor de conversión, materiales e IA en <code>127.0.0.1:8765</code>.</p>
+            </div>
+            <div class="g-card">
+              <p class="g-card-label">Terminal 2</p>
+              <pre><code>just dev</code></pre>
+              <p>Visor en <code>localhost:5173</code>. Ábrelo en el navegador.</p>
+            </div>
+          </div>
+          <p>
+            Para abrir GLB o los ejemplos basta con <code>just dev</code>. Para convertir planos,
+            usar materiales o editar con IA necesitas también <code>just serve</code>.
+          </p>
+
+          <h3>Activar la edición con IA (opcional)</h3>
+          <p>La IA la usa solo el servidor; las claves nunca llegan al navegador.</p>
+          <pre><code>cd pipeline
+uv sync --extra ai                 # SDK de Anthropic y OpenAI
+export ANTHROPIC_API_KEY=…         # Claude
+export OPENAI_API_KEY=…            # OpenAI
+export EXTRUDE_OPENAI_MODEL=…      # modelo de OpenAI contratado
+uv run extrude serve</code></pre>
+          <p>
+            Para probar sin coste ni red: <code>uv run extrude serve --ai-simulated</code> añade el
+            proveedor <strong>Simulado</strong>, un intérprete de reglas local (no es IA). En
+            PowerShell, las variables se escriben <code>$env:ANTHROPIC_API_KEY="…"</code>.
+          </p>
+        </section>
+
+        <!-- 2 ------------------------------------------------------------------------------ -->
+        <section id="primer-recorrido">
+          <h2><span class="g-num">2</span>Primer recorrido con los ejemplos</h2>
+          <div class="g-callout">
+            <strong>Empieza sin configurar tu proyecto.</strong> Con el visor arrancado, abre
+            <strong>Manzana 2D</strong> en la pantalla de inicio. Para consultar este ejemplo no
+            necesitas activar una API de IA. Si todavía no has arrancado el visor,
+            <a href="#instalar">sigue los pasos de instalación</a>.
+          </div>
+          <ol class="g-steps">
+            <li>
+              Con <code>just dev</code> en marcha, abre el visor: verás la pantalla de inicio con
+              tres ejemplos de un clic.
+            </li>
+            <li>
+              Pulsa <strong>Manzana 2D</strong>. Al terminar la carga aparece el espacio de trabajo.
+            </li>
+            <li>Gira arrastrando, acerca con la rueda y pulsa <kbd>F</kbd> para encuadrar todo.</li>
+            <li>
+              Pulsa un edificio: la tarjeta muestra su etiqueta (E-001…), altura, plantas, cota y
+              capa.
+            </li>
+            <li>
+              En el panel derecho, mueve la línea de tiempo del <strong>Sol</strong> o pulsa
+              <kbd>Espacio</kbd> para ver el día y sus sombras.
+            </li>
+            <li>
+              Pulsa <kbd>N</kbd> para guardar la vista: aparece en la pestaña
+              <strong>Vistas</strong>.
+            </li>
+            <li>Abre <strong>Exportar → PNG</strong> para obtener una imagen.</li>
+          </ol>
+        </section>
+
+        <!-- 3 ------------------------------------------------------------------------------ -->
+        <section id="preparar">
+          <h2><span class="g-num">3</span>Preparar tu plano</h2>
+          <p>
+            Cada estudio dibuja distinto. Extrude no presupone nada: capas, alturas y unidades se
+            declaran en un <strong>YAML del proyecto</strong>.
+          </p>
+          <h3>1. Inspeccionar</h3>
+          <pre><code>cd pipeline
+uv run extrude inspect ../planos/manzana.dxf</code></pre>
+          <p>
+            Muestra unidades, extensión, entidades por tipo y capa, ejemplos de textos (para
+            detectar rótulos como <code>4P</code> o <code>B+3</code>), atributos de bloque y avisos.
+            Si las unidades del dibujo faltan o son incorrectas, fuérzalas con
+            <code>--units mm</code>.
+          </p>
+          <h3>2. Generar un borrador</h3>
+          <pre><code>uv run extrude init-config ../planos/manzana.dxf -o ../proyecto.yaml</code></pre>
+          <p>
+            Adivina el tipo de cada capa por su nombre (<code>EDIF*</code> → edificio,
+            <code>VIAL*</code> → vial, <code>AGUA</code>, <code>VERDE</code>, <code>CURVA</code> →
+            terreno) y de dónde sale la altura (atributos, textos dentro de la planta, tipo de
+            bloque o cota Z). Cada regla lleva comentarios con la evidencia.
+          </p>
+          <div class="g-callout g-callout-warn">
+            <strong>Revísalo siempre:</strong> es un punto de partida, no una configuración
+            verificada.
+          </div>
+          <h3>3. Ajustar el YAML</h3>
+          <pre><code>units: auto            # auto | mm | cm | m | km | in | ft
+recenter: true         # imprescindible con coordenadas UTM
+crs: "EPSG:25830"      # opcional: sitúa el sol en la ubicación real
+layers:                # gana la PRIMERA regla que encaje
+  - match: "EDIFIC*"
+    kind: building
+    height_from: text          # altura leída de rótulos dentro de cada planta
+    text_regex: '(\d+)\s*P'    # «4P» → 4 plantas
+    floor_height: 3.0          # m por planta (también la usa la IA)
+  - match: "VIALES"
+    kind: road
+  - match: "CURVAS"
+    kind: terrain
+  - match: "*"
+    kind: ignore</code></pre>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tipo (<code>kind</code>)</th>
+                  <th>Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>building</code></td>
+                  <td>Volumen extruido (con patios) según su altura</td>
+                </tr>
+                <tr>
+                  <td><code>road</code>, <code>water</code>, <code>vegetation</code></td>
+                  <td>Superficie plana o adaptada al terreno</td>
+                </tr>
+                <tr>
+                  <td><code>terrain</code></td>
+                  <td>Terreno triangulado desde curvas y puntos acotados</td>
+                </tr>
+                <tr>
+                  <td><code>line</code></td>
+                  <td>Líneas 3D sin extruir</td>
+                </tr>
+                <tr>
+                  <td><code>ignore</code></td>
+                  <td>Nada (se cuenta en el informe)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            <strong>Altura</strong>, por prioridad: <code>height_from</code> (texto, atributo,
+            bloque o cota) → <code>floors</code> × <code>floor_height</code> → <code>height</code> →
+            <code>default_height</code>. Un edificio sin ninguna se <strong>descarta</strong> y
+            aparece en el informe como «sin altura».
+          </p>
+          <ul class="g-list">
+            <li>
+              <strong>Catastro</strong> (<code>IV</code>, <code>II</code>):
+              <code>text_regex: '^\s*([IVXL]+)\b'</code>
+            </li>
+            <li>
+              <strong>«B+3»</strong> = baja + 3: <code>text_regex: 'B\s*\+\s*(\d+)'</code> y
+              <code>floor_offset: 1</code>
+            </li>
+            <li>
+              <strong>Atributo de bloque</strong>: <code>height_from: attribute</code>,
+              <code>attribute: ALTURA</code>, <code>value_means: meters</code>
+            </li>
+            <li>
+              <strong>Apoyar en el terreno</strong>: <code>base_from_terrain: true</code> (planta
+              horizontal + zócalo hasta el terreno)
+            </li>
+            <li>
+              <strong>Bloques repetidos</strong> (árboles, quioscos): se instancian si hay al menos
+              <code>instancing_min</code> copias (10 por defecto)
+            </li>
+          </ul>
+          <p class="g-more">Todas las claves: <code>docs/CONFIG.md</code>.</p>
+        </section>
+
+        <!-- 4 ------------------------------------------------------------------------------ -->
+        <section id="convertir">
+          <h2><span class="g-num">4</span>Convertir</h2>
+          <h3>Desde el visor (lo más cómodo)</h3>
+          <ol class="g-steps">
+            <li>
+              Con <code>just serve</code> en marcha, suelta primero el <code>.yaml</code> del
+              proyecto (o elígelo con <strong>Config YAML…</strong>). Si no, se genera un borrador
+              automático.
+            </li>
+            <li>
+              Suelta el <code>.dwg</code> o <code>.dxf</code>, o usa
+              <strong>Examinar equipo</strong>.
+            </li>
+            <li>
+              El visor muestra la fase real: leyendo entidades, construyendo geometría, exportando…
+            </li>
+            <li>Se abre el modelo, con enlaces al GLB, al informe y a la configuración usada.</li>
+          </ol>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Botón</th>
+                  <th>Qué hace</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Cancelar espera</td>
+                  <td>Deja de esperar; la conversión sigue en el servidor</td>
+                </tr>
+                <tr>
+                  <td>Retomar espera</td>
+                  <td>Vuelve a consultar el mismo trabajo sin reenviar el plano</td>
+                </tr>
+                <tr>
+                  <td>Reabrir resultado</td>
+                  <td>Reutiliza los archivos si terminó pero falló la descarga</td>
+                </tr>
+                <tr>
+                  <td>Reintentar envío</td>
+                  <td>Vuelve a subir el plano si el trabajo falló o caducó</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Desde la línea de comandos</h3>
+          <pre><code>cd pipeline
+uv run extrude convert ../planos/manzana.dwg -c ../proyecto.yaml -o ../out/manzana</code></pre>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Archivo</th>
+                  <th>Contenido</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>model.glb</code></td>
+                  <td>El modelo 3D</td>
+                </tr>
+                <tr>
+                  <td><code>report.md</code> / <code>report.json</code></td>
+                  <td>Todo lo leído, convertido, reparado o descartado, por capa</td>
+                </tr>
+                <tr>
+                  <td><code>objects.json</code></td>
+                  <td>Catálogo: ID persistente, etiqueta (E-001…), superficies y revisión</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Revisar la calidad</h3>
+          <p>
+            Al abrir un resultado aparece un <strong>resumen de calidad</strong>: alturas por
+            defecto o ambiguas, descartes por falta de altura y comprobaciones de apoyo (flotantes,
+            enterrados, fuera del terreno). El informe identifica cada caso con los handles del DXF
+            y sus coordenadas, para localizarlo en el CAD.
+          </p>
+          <h3>Planos muy grandes</h3>
+          <ul class="g-list">
+            <li>
+              <strong>Teselas</strong>: abre el visor con <code>?tiles=500</code> o usa
+              <code>--tiles 500</code> en la CLI.
+            </li>
+            <li>
+              <strong>Compresión</strong>: <code>--compress meshopt</code> (o <code>draco</code>).
+            </li>
+          </ul>
+          <p>
+            Con teselas o compresión, la conversión guarda además un
+            <strong>maestro editable</strong> (<code>model.master.glb</code>, sin comprimir y de una
+            pieza). Los materiales, la edición con IA y deshacer o rehacer trabajan sobre él.
+          </p>
+          <ul class="g-list">
+            <li>
+              <strong>Teselado:</strong> cada revisión confirmada, y cada deshacer o rehacer,
+              regenera <code>tiles/*.glb</code> y <code>manifest.json</code> con la misma regla de
+              reparto que la conversión. Si un objeto se mueve a otra tesela, cambia de archivo.
+            </li>
+            <li>
+              <strong>Comprimido</strong> (Draco o Meshopt): se decodifica a un maestro que conserva
+              los IDs, las etiquetas y las instancias. El original no se modifica. En
+              <em>Exportar</em> tienes <em>GLB actual comprimido (Meshopt)</em> y <em>(Draco)</em>.
+            </li>
+          </ul>
+        </section>
+
+        <!-- 5 ------------------------------------------------------------------------------ -->
+        <section id="visor">
+          <h2><span class="g-num">5</span>El visor</h2>
+          <h3>Zonas de la pantalla</h3>
+          <div class="g-grid-2">
+            <div class="g-card">
+              <p class="g-card-label">Barra superior</p>
+              <p>
+                Modelo y origen UTM · <strong>Abrir</strong> · Perspectiva / Ortográfica ·
+                <strong>Ajustar</strong> · <strong>Medir</strong> · <strong>Guía</strong> · tema ·
+                ocultar paneles · <strong>Exportar</strong> · <strong>Cerrar modelo</strong>
+              </p>
+            </div>
+            <div class="g-card">
+              <p class="g-card-label">Panel izquierdo</p>
+              <p>
+                Pestañas <strong>Vistas</strong>, <strong>Capas</strong> y
+                <strong>Materiales</strong> (con la edición con IA).
+              </p>
+            </div>
+            <div class="g-card">
+              <p class="g-card-label">Panel derecho · Inspector</p>
+              <p>
+                <strong>Luz solar</strong>, <strong>Sombras</strong>, <strong>Entorno</strong>,
+                <strong>Cámara</strong>, <strong>Postprocesado</strong> y <strong>Luces</strong>.
+              </p>
+            </div>
+            <div class="g-card">
+              <p class="g-card-label">Sobre la vista</p>
+              <p>
+                Cubo de orientación con aguja del norte · FPS, triángulos y draw calls · tarjeta del
+                objeto pulsado · avisos.
+              </p>
+            </div>
+          </div>
+          <h3>Navegar</h3>
+          <ul class="g-list">
+            <li>
+              <strong>Arrastrar</strong> orbita, la <strong>rueda</strong> acerca,
+              <strong>doble clic</strong> centra en un punto.
+            </li>
+            <li>
+              <strong>Cubo de orientación</strong>: planta, alzados norte/sur/este/oeste e
+              isométrica.
+            </li>
+            <li>
+              <kbd>F</kbd> encuadra el modelo; <strong>Enfocar</strong>, en la tarjeta de un objeto,
+              lo encuadra a él.
+            </li>
+          </ul>
+          <h3>Capas</h3>
+          <p>
+            Buscador, visibilidad, color, <strong>aislar</strong> y triángulos por capa. Los colores
+            de capa son de visualización: al aplicar materiales se retiran para no teñir las
+            texturas.
+          </p>
+          <h3>Inspeccionar y medir</h3>
+          <p>
+            Pulsa un objeto para ver etiqueta, ID, superficie pulsada (fachada, patio, cubierta,
+            zócalo…), altura, plantas, cota y capa. Con <kbd>M</kbd> mides: dos clics dan distancia
+            3D, en planta, desnivel y pendiente. <kbd>Esc</kbd> borra la medición.
+          </p>
+          <h3>Sol, sombras y ambiente</h3>
+          <ul class="g-list">
+            <li>
+              <strong>Luz solar</strong>: línea de 0 a 24 h con amanecer y ocaso, ▶ para reproducir
+              el día (0,5×–4×), fecha, zona horaria, coordenadas, modo manual y
+              <strong>Norte real</strong>. Con un <code>crs</code> UTM en el YAML, el sol se sitúa
+              en la ubicación del plano.
+            </li>
+            <li>
+              <strong>Sombras</strong>: sin sombras, definidas o suaves; suavizado y cobertura
+              (automática, zona visible o toda la escena).
+            </li>
+            <li>
+              <strong>Entorno</strong>: cielo procedural, color o HDRI (<strong>Cargar…</strong>);
+              luz ambiente; suelo con sombras.
+            </li>
+            <li>
+              <strong>Cámara</strong>: campo de visión vertical y modo vuelo.
+              <strong>Postprocesado</strong>: tone mapping (AgX, ACES, Neutral, lineal) y
+              exposición.
+            </li>
+            <li>
+              <strong>Luces</strong>: puntuales, focos y de área; se colocan con un clic sobre el
+              modelo.
+            </li>
+          </ul>
+          <h3>Atajos</h3>
+          <div class="g-keys">
+            <span><kbd>F</kbd> encuadrar</span>
+            <span><kbd>N</kbd> nueva vista</span>
+            <span><kbd>M</kbd> medir</span>
+            <span><kbd>Espacio</kbd> reproducir el día</span>
+            <span><kbd>Tab</kbd> modo zen</span>
+            <span><kbd>Esc</kbd> cerrar o borrar medición</span>
+            <span
+              ><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> borrador de
+              materiales</span
+            >
+          </div>
+        </section>
+
+        <!-- 6 ------------------------------------------------------------------------------ -->
+        <section id="vistas">
+          <h2><span class="g-num">6</span>Vistas y exportación</h2>
+          <p>
+            Una vista guarda cámara, sol, luces, capas y entorno, con miniatura. En
+            <strong>Vistas</strong>: crea una con <kbd>N</kbd>, elige el formato de render (16:9,
+            4:3, 1:1… con su resolución), activa el <strong>marco</strong> para ver el encuadre
+            exacto y, en cada tarjeta, restaura, renombra, actualiza, duplica, reordena o borra. Se
+            guardan en el navegador, por modelo, y no cambian al aplicar materiales o editar la
+            geometría.
+          </p>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Exportar →</th>
+                  <th>Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>PNG</strong></td>
+                  <td>Render de la vista actual a la resolución elegida</td>
+                </tr>
+                <tr>
+                  <td><strong>Script Blender</strong></td>
+                  <td>
+                    <code>blender_setup.py</code>: cámaras, sol, luces y capas por vista;
+                    <code>render_all()</code> las renderiza todas
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>views.json</strong></td>
+                  <td>Todas las vistas con la cámara en coordenadas reales del DWG</td>
+                </tr>
+                <tr>
+                  <td><strong>GLB + cámaras y luces</strong></td>
+                  <td>El modelo con una cámara por vista y las luces de la activa</td>
+                </tr>
+                <tr>
+                  <td><strong>Importar views.json…</strong></td>
+                  <td>Recupera vistas exportadas</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Para Blender, copia <code>blender_setup.py</code> junto al GLB (si confirmaste
+            materiales, el <code>.materialized.glb</code> que descargas en Materiales) y ejecútalo
+            en <em>Scripting</em> o con <code>blender -b -P blender_setup.py</code>.
+          </p>
+          <div class="g-callout g-callout-warn">
+            Mientras haya una <strong>previsualización sin confirmar</strong> (materiales o cambios
+            con IA), exportar está bloqueado: confirma o descarta antes.
+          </div>
+        </section>
+
+        <!-- 7 ------------------------------------------------------------------------------ -->
+        <section id="materiales">
+          <h2><span class="g-num">7</span>Materiales</h2>
+          <p>
+            Pestaña <strong>Materiales</strong> (necesita <code>just serve</code>): materiales
+            reales con textura por edificio y superficie, sin cambiar la geometría.
+          </p>
+          <div class="g-grid-2">
+            <div class="g-card">
+              <p class="g-card-label">Objeto</p>
+              <p>
+                Cada edificio, vial o copia de bloque, con etiqueta estable (E-001, V-001, KIOSCO
+                #3). Los edificios se numeran de norte a sur y de oeste a este.
+              </p>
+            </div>
+            <div class="g-card">
+              <p class="g-card-label">Superficie</p>
+              <p>
+                Fachada exterior, fachada de patio, cubierta, zócalo, suelo. Cada objeto ofrece solo
+                las suyas.
+              </p>
+            </div>
+            <div class="g-card">
+              <p class="g-card-label">Biblioteca</p>
+              <p>
+                12 materiales: ladrillos, hormigón, revestimiento blanco, piedra, asfalto, grava,
+                madera, metal, vidrio, vegetación y agua.
+              </p>
+            </div>
+            <div class="g-card">
+              <p class="g-card-label">Pieza</p>
+              <p>
+                Tamaño real de un ladrillo o losa (p. ej. 0,25 × 0,067 m). Sin piezas (asfalto,
+                revoco), el campo es la repetición de la textura.
+              </p>
+            </div>
+          </div>
+          <h3>Asignar a mano</h3>
+          <ol class="g-steps">
+            <li>
+              Marca objetos en la lista (filtrable), pulsa uno en la vista y usa
+              <strong>+ Pulsado en 3D</strong>, o <strong>Marcar filtrados</strong>.
+            </li>
+            <li>
+              Elige <strong>Superficie</strong> (indica cuántos marcados la tienen) y
+              <strong>Material</strong>.
+            </li>
+            <li>
+              Ajusta si quieres <strong>Color</strong>, <strong>Rugosidad</strong>,
+              <strong>Pieza (m)</strong> y <strong>Giro (°)</strong>.
+            </li>
+            <li>
+              <strong>Añadir asignación</strong>: sustituye a la anterior para ese objeto y
+              superficie.
+            </li>
+          </ol>
+          <h3>Previsualizar y confirmar</h3>
+          <ul class="g-list">
+            <li>
+              <strong>Previsualizar</strong>: el servidor aplica los materiales y el modelo se
+              recarga sin mover cámara, sol ni capas.
+            </li>
+            <li><strong>Descartar</strong>: vuelve al último estado confirmado.</li>
+            <li>
+              <strong>Confirmar</strong>: guarda una revisión (<code>mat-001</code>…) y ofrece el
+              <strong>GLB materializado</strong> (texturas incluidas) y
+              <strong>materials.json</strong>.
+            </li>
+            <li>
+              <strong>Importar / Exportar plan</strong> carga o guarda <code>materials.json</code>;
+              <strong>Quitar descripción</strong> elimina el texto de una petición con IA
+              conservando las asignaciones.
+            </li>
+          </ul>
+          <p>
+            Funciona con modelos convertidos desde el visor y con GLB base abiertos desde disco. Un
+            GLB ya materializado no se edita: abre su <code>model.glb</code>.
+          </p>
+        </section>
+
+        <!-- 8 ------------------------------------------------------------------------------ -->
+        <section id="ia">
+          <h2><span class="g-num">8</span>Editar el proyecto con IA</h2>
+          <p>
+            Sección <strong>Editar proyecto con IA</strong>, arriba en Materiales. Escribe
+            libremente qué quieres cambiar: una <strong>única consulta</strong> devuelve una
+            interpretación y un plan de operaciones que Extrude ejecuta de verdad sobre el modelo.
+            Nada se aplica sin tu revisión.
+          </p>
+          <h3>Operaciones básicas de referencia</h3>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Pide algo como…</th>
+                  <th>Operación</th>
+                  <th>Condiciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>«Ladrillo claro en las fachadas de E-001 y E-002»</td>
+                  <td>Asignar material</td>
+                  <td>Objetos con esa superficie</td>
+                </tr>
+                <tr>
+                  <td>«Sube E-006 dos plantas», «altura de 20 m»</td>
+                  <td>Cambiar altura</td>
+                  <td>
+                    Cubierta plana, no copias de bloque; plantas × altura de planta configurada
+                  </td>
+                </tr>
+                <tr>
+                  <td>«Mueve E-007 10 m al sur»</td>
+                  <td>Mover</td>
+                  <td>Edificios y copias de bloque; no se reapoya sobre terreno irregular</td>
+                </tr>
+                <tr>
+                  <td>«Gira el KIOSCO #4 45 grados»</td>
+                  <td>Girar</td>
+                  <td>Alrededor de su centro, en planta</td>
+                </tr>
+                <tr>
+                  <td>«Duplica E-002 40 m al este»</td>
+                  <td>Duplicar</td>
+                  <td>Etiqueta nueva; hereda materiales</td>
+                </tr>
+                <tr>
+                  <td>«Prepara una vista al atardecer»</td>
+                  <td>Crear vista</td>
+                  <td>Encuadre y hora: amanecer, mediodía, atardecer u HH:MM</td>
+                </tr>
+                <tr>
+                  <td>«Pon el sol a las 18:30»</td>
+                  <td>Cambiar sol</td>
+                  <td>—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Arquitectura y entorno</h3>
+          <div class="g-table-wrap">
+            <table class="g-table">
+              <thead>
+                <tr>
+                  <th>Pide algo como…</th>
+                  <th>Operación</th>
+                  <th>Condiciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>«Coloca 10 árboles a lo largo de V-001 cada 5 m»</td>
+                  <td>Colocar en el entorno</td>
+                  <td>
+                    Árbol de copa, árbol columnar, arbusto, banco, farola y papelera. En fila,
+                    alrededor de un objeto (los bancos miran al centro) o en un punto. Sin terreno,
+                    se pide la cota de apoyo: nunca se inventa
+                  </td>
+                </tr>
+                <tr>
+                  <td>«Añade ventanas en la fachada sur de E-001»</td>
+                  <td>Ventanas</td>
+                  <td>
+                    Vidrio y carpintería añadidos sobre el muro, <strong>sin perforarlo</strong>.
+                    Por fachada y por plantas; no duplica ventanas existentes
+                  </td>
+                </tr>
+                <tr>
+                  <td>«Balcones en las plantas 2 y 3 de E-001»</td>
+                  <td>Balcones</td>
+                  <td>
+                    Nunca en la planta baja. Siguen al edificio, y bajarlo por debajo de ellos se
+                    rechaza
+                  </td>
+                </tr>
+                <tr>
+                  <td>«Haz un ático en E-006 retranqueado 2 m al norte»</td>
+                  <td>Retranqueo</td>
+                  <td>
+                    Con patios y huellas cóncavas. Se rechaza si la planta desaparece. Hereda los
+                    materiales
+                  </td>
+                </tr>
+                <tr>
+                  <td>«Independiza DOBLE #2.1 y súbela 3 m»</td>
+                  <td>Independizar copia</td>
+                  <td>
+                    Solo esa copia, con los mismos IDs; las demás no cambian. Cambiar todas las
+                    copias a la vez no está disponible
+                  </td>
+                </tr>
+                <tr>
+                  <td>«Sube los muros de E-001 2 m» · «Cumbrera a 1,5 m»</td>
+                  <td>Subir muros · Cumbrera</td>
+                  <td>
+                    Cubiertas inclinadas: se conserva la forma o se fija la cumbrera sobre el alero
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="g-callout">
+            <strong>Comprueba el plan de tu versión.</strong> Las operaciones disponibles y sus
+            condiciones de compatibilidad aparecen en la propuesta. Siguen sin estar disponibles:
+            perforar huecos reales, generar caminos, editar el terreno, pedir especies o productos
+            concretos, cambiar la pendiente por ángulo y editar un bloque en todas sus copias. Si
+            una petición no puede ejecutarse, debe aparecer como pendiente o no realizable, sin
+            darse por hecha. Las peticiones estéticas («aspecto mediterráneo») se traducen en
+            operaciones marcadas como <span class="g-chip g-chip-warn">supuesto</span>, sin marcar.
+          </div>
+
+          <h3>Paso a paso</h3>
+          <ol class="g-steps">
+            <li>
+              Elige <strong>Proveedor</strong> (Claude, OpenAI o Simulado) y
+              <strong>Alcance</strong>: todo, solo los marcados o una capa.
+            </li>
+            <li>
+              Escribe en <strong>Qué quieres cambiar</strong> y pulsa
+              <strong>Proponer cambios</strong>.
+            </li>
+            <li>
+              La primera vez con cada proveedor ves a quién se envía, qué datos y el contenido
+              exacto. <strong>Autorizar y enviar</strong> manda exactamente lo revisado; si cambias
+              algo con el diálogo abierto, hay que revisarlo de nuevo.
+            </li>
+            <li>
+              Revisa <em>Así he entendido tu petición</em>, los requisitos, los supuestos y las
+              operaciones con sus objetos (resaltados en naranja) y su impacto, p. ej. «E-001 12 →
+              18 m».
+            </li>
+            <li>Marca las operaciones que quieras; las dependencias se marcan solas.</li>
+            <li><strong>Previsualizar marcadas</strong> para ver el resultado sin guardarlo.</li>
+            <li>
+              <strong>Confirmar</strong>: queda una revisión nueva del proyecto y las vistas pedidas
+              aparecen en Vistas.
+            </li>
+          </ol>
+
+          <h3>Estados de una operación</h3>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Estado</th>
+                  <th>Significa</th>
+                  <th>Qué hacer</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="g-chip">Lista</span></td>
+                  <td>Se puede aplicar</td>
+                  <td>Marcarla</td>
+                </tr>
+                <tr>
+                  <td><span class="g-chip g-chip-warn">Elige objetos</span></td>
+                  <td>Referencia ambigua («los del norte», «la central»)</td>
+                  <td>
+                    <strong>Usar candidatos</strong> o marca otros y <strong>Usar marcados</strong>
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="g-chip g-chip-warn">Falta un dato</span></td>
+                  <td>Pediste plantas y no hay altura de planta configurada</td>
+                  <td>Escribe la <strong>Altura de planta (m)</strong></td>
+                </tr>
+                <tr>
+                  <td><span class="g-chip">Resuelta</span></td>
+                  <td>Ya diste lo que faltaba</td>
+                  <td>Marcarla</td>
+                </tr>
+                <tr>
+                  <td><span class="g-chip g-chip-danger">Bloqueada</span></td>
+                  <td>Conflicto o dependencia que no se puede aplicar</td>
+                  <td>Reformula la petición</td>
+                </tr>
+                <tr>
+                  <td><span class="g-chip g-chip-danger">No compatible</span></td>
+                  <td>Ningún objeto la admite (p. ej. subir una copia de bloque)</td>
+                  <td>Elige otros objetos</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Resolver dudas, dar datos, previsualizar y confirmar
+            <strong>no vuelven a consultar a la IA</strong>. «Los del norte» son los edificios al
+            norte del centro del conjunto (<strong>norte = +Y del plano</strong>, no el geográfico);
+            «el más alto», «el central» se ordenan por altura, área o cercanía al centro. Siempre
+            con tu confirmación.
+          </p>
+          <details class="g-platform">
+            <summary>Configurar las claves en Windows (PowerShell)</summary>
+            <p>
+              Desde la carpeta del repositorio, usa el bloque de tu proveedor. Sustituye los valores
+              de ejemplo y ejecuta el servidor en esa misma terminal.
+            </p>
+            <p><strong>Claude:</strong></p>
+            <pre><code>cd pipeline
+uv sync --extra ai
+$env:ANTHROPIC_API_KEY="TU_CLAVE"
+uv run extrude serve</code></pre>
+            <p><strong>OpenAI:</strong></p>
+            <pre><code>cd pipeline
+uv sync --extra ai
+$env:OPENAI_API_KEY="TU_CLAVE"
+$env:EXTRUDE_OPENAI_MODEL="TU_MODELO"
+uv run extrude serve</code></pre>
+          </details>
+
+          <h3>Ejemplos</h3>
+          <pre><code>Sube E-001 dos plantas y pon grava en todas las cubiertas salvo E-004
+Los edificios del norte de ladrillo claro
+Mueve E-007 10 m al sur y gira el KIOSCO #4 45 grados
+Duplica E-002 40 m al este
+Coloca 10 árboles a lo largo de V-001 cada 5 m a ambos lados
+Añade ventanas en la fachada sur de E-001 y balcones en las plantas 2 y 3 de E-001
+Haz un ático en E-006 retranqueado 2 m al norte
+Independiza DOBLE #2.1 y súbela 3 m
+Mantén todo como está, pero cambia la cubierta de E-006 a grava
+Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
+          <p>
+            Consejos: cita los objetos por su etiqueta, marca en la lista los que nombras y usa
+            <strong>Solo marcados</strong>; pide los cambios grandes por partes.
+          </p>
+
+          <h3>Coste y privacidad</h3>
+          <div class="g-grid-2">
+            <div class="g-card">
+              <p class="g-card-label">Consumo</p>
+              <ul class="g-list">
+                <li>Una pulsación, como mucho una consulta; sin reintentos automáticos.</li>
+                <li>Una petición idéntica sobre el mismo estado sale de la caché.</li>
+                <li>Tras 5 consultas en un proyecto se pide confirmación.</li>
+                <li>Se muestran tokens y duración informados por el proveedor.</li>
+                <li>Cancelar deja de esperar, pero el proveedor puede terminar y facturar.</li>
+              </ul>
+            </div>
+            <div class="g-card">
+              <p class="g-card-label">Privacidad</p>
+              <ul class="g-list">
+                <li>
+                  <strong>Se envía</strong>: tu petición y, por objeto del alcance, etiqueta, capa,
+                  tipo, tamaño, altura, superficies, materiales y posición relativa.
+                </li>
+                <li>
+                  <strong>No se envía</strong>: DWG, GLB, imágenes, coordenadas absolutas, rutas ni
+                  claves.
+                </li>
+                <li>El texto va tal cual: no incluyas datos personales.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 9 ------------------------------------------------------------------------------ -->
+        <section id="revisiones">
+          <h2><span class="g-num">9</span>Revisiones, deshacer y archivos</h2>
+          <p>
+            Cada confirmación (materiales, cambios con IA o solo vistas) crea una revisión:
+            <code>rev-000</code> es el modelo convertido, luego <code>rev-001</code>,
+            <code>rev-002</code>… La actual se ve en <strong>Editar proyecto con IA</strong>, con
+            <strong>Deshacer</strong> y <strong>Rehacer</strong>, que restauran geometría,
+            materiales y vistas creadas. Ninguna revisión se borra; una propuesta hecha sobre otra
+            revisión es <strong>obsoleta</strong> y hay que pedirla de nuevo.
+          </p>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Archivo del trabajo (<code>out/</code>)</th>
+                  <th>Contenido</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>model.glb</code></td>
+                  <td>Modelo convertido (no cambia)</td>
+                </tr>
+                <tr>
+                  <td><code>model.current.glb</code></td>
+                  <td>Geometría vigente, con las ediciones</td>
+                </tr>
+                <tr>
+                  <td><code>model.materialized.glb</code></td>
+                  <td>Geometría vigente con materiales</td>
+                </tr>
+                <tr>
+                  <td><code>materials.json</code></td>
+                  <td>Plan de materiales vigente</td>
+                </tr>
+                <tr>
+                  <td><code>project.json</code></td>
+                  <td>Historial de revisiones</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            En modo local, el servidor conserva los 10 últimos trabajos temporales. En modo
+            compartido, los proyectos con propietario no se borran con esa limpieza; al alcanzar tu
+            cuota se rechazan nuevas cargas. Para guardar una copia, descarga el GLB materializado y
+            <code>materials.json</code> y exporta tus vistas.
+          </p>
+        </section>
+
+        <!-- 10 ----------------------------------------------------------------------------- -->
+        <section id="comandos">
+          <h2><span class="g-num">10</span>Referencia de comandos</h2>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Comando</th>
+                  <th>Para qué</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>just setup</code></td>
+                  <td>Instalar todo</td>
+                </tr>
+                <tr>
+                  <td><code>just serve</code></td>
+                  <td>Servidor local (conversión, materiales, IA)</td>
+                </tr>
+                <tr>
+                  <td><code>just dev</code></td>
+                  <td>Visor</td>
+                </tr>
+                <tr>
+                  <td><code>just doctor</code></td>
+                  <td>Ver qué conversor DWG hay</td>
+                </tr>
+                <tr>
+                  <td><code>extrude inspect plano.dxf</code></td>
+                  <td>Analizar un plano</td>
+                </tr>
+                <tr>
+                  <td><code>extrude init-config plano.dxf -o proyecto.yaml</code></td>
+                  <td>Borrador de configuración</td>
+                </tr>
+                <tr>
+                  <td><code>extrude convert plano.dwg -c proyecto.yaml -o salida/</code></td>
+                  <td>Convertir (<code>--tiles</code>, <code>--compress</code>)</td>
+                </tr>
+                <tr>
+                  <td><code>extrude library</code></td>
+                  <td>Biblioteca de materiales</td>
+                </tr>
+                <tr>
+                  <td>
+                    <code>extrude validate-materials materials.json --objects objects.json</code>
+                  </td>
+                  <td>Validar un plan</td>
+                </tr>
+                <tr>
+                  <td><code>extrude materialize model.glb materials.json</code></td>
+                  <td>Aplicar materiales</td>
+                </tr>
+                <tr>
+                  <td><code>just validate model.glb</code></td>
+                  <td>Validar un GLB (Khronos)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Opciones de <code>extrude serve</code>: <code>--port</code>, <code>--host</code>,
+            <code>--max-mb</code>, <code>--origin</code>, <code>--jobs-dir</code>,
+            <code>--ai-simulated</code>, <code>--shared --users ARCHIVO</code>.
+          </p>
+          <h3>Modo multiusuario</h3>
+          <p>
+            <code>extrude users add ana --users usuarios.json</code> crea un usuario (la contraseña
+            se guarda con scrypt). Con <code>extrude serve --shared --users usuarios.json</code>, el
+            visor pide iniciar sesión. Cada proyecto es de quien lo crea, y su dueño lo comparte
+            como <em>editor</em> o <em>lector</em>. Quien no tiene permiso no lo ve. Toda
+            confirmación lleva la revisión base: si otra persona confirmó antes, la tuya se rechaza
+            sin perder nada. Hay límites por usuario de intentos de acceso, de trabajos y de
+            consultas de IA.
+          </p>
+          <div class="g-callout">
+            El modo compartido no abre el servidor a la red: sigue en 127.0.0.1. Para usarlo en una
+            red local, pasa <code>--host</code> de forma explícita, detrás de un proxy con HTTPS.
+          </div>
+        </section>
+
+        <!-- 11 ----------------------------------------------------------------------------- -->
+        <section id="problemas">
+          <h2><span class="g-num">11</span>Solución de problemas</h2>
+          <div class="g-faq">
+            <details>
+              <summary>No se puede convertir un DWG</summary>
+              <p>
+                No hay conversor DWG → DXF. Instala ODA File Converter o LibreDWG (<code
+                  >just doctor</code
+                >) o guarda el plano como DXF.
+              </p>
+            </details>
+            <details>
+              <summary>El modelo sale diminuto o gigante</summary>
+              <p>
+                Unidades mal declaradas: pon <code>units: mm</code> (o la que toque) y compruébalo
+                con <code>inspect</code>.
+              </p>
+            </details>
+            <details>
+              <summary>Faltan edificios</summary>
+              <p>
+                No tenían altura. Revisa «sin altura» en el informe; añade
+                <code>default_height</code> o ajusta <code>text_regex</code>.
+              </p>
+            </details>
+            <details>
+              <summary>Edificios flotando o enterrados</summary>
+              <p>
+                Activa <code>base_from_terrain: true</code> y revisa los casos señalados en el
+                resumen de calidad.
+              </p>
+            </details>
+            <details>
+              <summary>Materiales: «Sin biblioteca»</summary>
+              <p><code>extrude serve</code> no está en marcha. Arráncalo y recarga el visor.</p>
+            </details>
+            <details>
+              <summary>«Este GLB ya está materializado»</summary>
+              <p>Abriste un GLB con materiales: abre su <code>model.glb</code> base.</p>
+            </details>
+            <details>
+              <summary>IA: proveedor «no disponible»</summary>
+              <p>
+                Falta la clave o el modelo en el servidor. El motivo aparece bajo el selector;
+                configúralo y reinicia <code>extrude serve</code>.
+              </p>
+            </details>
+            <details>
+              <summary>IA: «Plan obsoleto»</summary>
+              <p>El proyecto cambió desde la propuesta. Vuelve a pedirla.</p>
+            </details>
+            <details>
+              <summary>IA: «La solicitud cambió: revísala de nuevo»</summary>
+              <p>
+                Editaste algo con el diálogo de autorización abierto. Pulsa otra vez
+                <strong>Proponer cambios</strong>.
+              </p>
+            </details>
+            <details>
+              <summary>IA: «Límite de consultas de la sesión»</summary>
+              <p>
+                Llevas 5 consultas en el proyecto. Pulsa
+                <strong>Continuar con una consulta más</strong> si quieres seguir.
+              </p>
+            </details>
+            <details>
+              <summary>IA: «El alcance tiene N objetos…»</summary>
+              <p>Demasiados objetos para una consulta: marca los afectados o elige una capa.</p>
+            </details>
+            <details>
+              <summary>IA: «Confirma o descarta antes tus asignaciones manuales»</summary>
+              <p>
+                Hay un borrador manual sin confirmar: confírmalo o descártalo en el pie de la
+                pestaña.
+              </p>
+            </details>
+            <details>
+              <summary>Exportar dice que hay una previsualización</summary>
+              <p>Hay cambios sin confirmar. Confirma o descarta.</p>
+            </details>
+            <details>
+              <summary>«Inicia sesión para usar este servidor compartido»</summary>
+              <p>El servidor está en modo <code>--shared</code>: entra con tu usuario.</p>
+            </details>
+            <details>
+              <summary>IA: «falta un dato: Cota de apoyo»</summary>
+              <p>El modelo no tiene terreno: escribe la cota en la operación antes de aplicar.</p>
+            </details>
+            <details>
+              <summary>El puerto 8765 está ocupado</summary>
+              <p>
+                Otro <code>extrude serve</code> sigue abierto. Ciérralo o usa <code>--port</code> y
+                abre el visor con <code>?server=http://127.0.0.1:PUERTO</code>.
+              </p>
+            </details>
+          </div>
+        </section>
+
+        <!-- 12 ----------------------------------------------------------------------------- -->
+        <section id="limitaciones">
+          <h2><span class="g-num">12</span>Compatibilidad y límites</h2>
+          <p>Antes de empezar, distingue qué requiere otra herramienta y qué necesita revisión.</p>
+          <h3>Formatos y entorno de trabajo</h3>
+          <ul class="g-list">
+            <li>
+              DWG necesita un conversor externo; los sólidos ACIS no se convierten (expórtalos como
+              malla).
+            </li>
+            <li>
+              El GLB con cámaras y el script de Blender parten del estado actual de una sola pieza
+              (el maestro en proyectos teselados); no se generan por tesela.
+            </li>
+            <li>
+              El modo compartido autentica y separa usuarios, pero no sirve HTTPS: para exponerlo,
+              usa un proxy con TLS. Las sesiones se pierden al reiniciar el servidor.
+            </li>
+          </ul>
+          <h3>Datos y aproximaciones que debes revisar</h3>
+          <ul class="g-list">
+            <li>
+              <strong>Alturas:</strong> el YAML automático es un borrador. Contrasta los valores por
+              defecto con tu plano o introduce las alturas conocidas.
+            </li>
+            <li>
+              <strong>Terreno:</strong> fuera del área triangulada las cotas se extrapolan.
+              Comprueba el informe y aporta más datos si necesitas un apoyo preciso.
+            </li>
+            <li>
+              <strong>Zócalo:</strong> es una aproximación geométrica del encuentro con el terreno;
+              no equivale a una cimentación calculada ni modifica la topografía.
+            </li>
+          </ul>
+          <h3>Compatibilidad de la edición</h3>
+          <p>
+            Antes de confirmar, revisa las operaciones <strong>Listas</strong>, las
+            <strong>No compatibles</strong> y las aclaraciones del plan. Una petición escrita no
+            implica que el cambio se haya ejecutado. Consulta las condiciones de cada operación en
+            <a href="#ia">Editar con IA</a> y <a href="#problemas">Solución de problemas</a>.
+          </p>
+        </section>
+
+        <!-- 13 ----------------------------------------------------------------------------- -->
+        <section id="glosario">
+          <h2><span class="g-num">13</span>Glosario</h2>
+          <dl class="g-glossary">
+            <dt>GLB / glTF</dt>
+            <dd>Formato estándar de modelos 3D; el GLB es un único archivo binario.</dd>
+            <dt>Etiqueta</dt>
+            <dd>
+              Nombre estable de un objeto: E-001 (edificio), V-001 (vial), KIOSCO #3 (copia de
+              bloque).
+            </dd>
+            <dt>ID persistente</dt>
+            <dd>
+              Identificador interno (<code>obj-…</code>) que no cambia mientras no cambie el dibujo.
+            </dd>
+            <dt>Revisión del proyecto</dt>
+            <dd>
+              <code>rev-000</code>, <code>rev-001</code>…: cada estado confirmado (geometría +
+              materiales).
+            </dd>
+            <dt>Revisión de materiales</dt>
+            <dd><code>mat-001</code>…: cada plan de materiales confirmado.</dd>
+            <dt>Superficie</dt>
+            <dd>Parte de un objeto: fachada exterior, de patio, cubierta, zócalo, suelo.</dd>
+            <dt>Pieza / repetición</dt>
+            <dd>Tamaño real de un ladrillo o losa / tamaño del mosaico de textura.</dd>
+            <dt>Zócalo</dt>
+            <dd>Pared que une la planta horizontal de un edificio con el terreno inclinado.</dd>
+            <dt>TIN</dt>
+            <dd>Terreno triangulado a partir de curvas de nivel y puntos acotados.</dd>
+            <dt>Copia de bloque</dt>
+            <dd>Bloque repetido que se dibuja una vez y se coloca muchas: más rápido.</dd>
+            <dt>Norte del plano</dt>
+            <dd>Dirección +Y del dibujo; el norte real se ajusta en el Inspector.</dd>
+          </dl>
+        </section>
+
+        <footer class="g-footer">
+          <p>
+            Extrude · documentación técnica en <code>docs/</code> (CONFIG, EXPORT_FORMATS,
+            EDICION_IA, ARCHITECTURE).
+          </p>
+          <a class="g-btn g-btn-primary" href="./">Abrir el visor</a>
+        </footer>
+      </main>
+    </div>
+    <script type="module" src="/src/guide/guide.ts"></script>
+  </body>
+</html>
