@@ -250,6 +250,15 @@ edificio y superficie, sin IA:
 
 Funciona con modelos convertidos desde el visor y con GLB base abiertos desde disco (se suben a
 `extrude serve` al previsualizar). Un GLB ya materializado no se vuelve a editar: abre su base.
+
+*Editar proyecto con IA* (opcional): escribe libremente qué quieres cambiar («sube E-001 dos
+plantas, mueve E-007 10 m al sur, ladrillo rojo en todos salvo E-002, una vista al atardecer»).
+Una única llamada a Claude u OpenAI (configurados en `extrude serve` con `uv sync --extra ai` y sus
+claves) devuelve la interpretación y un plan de operaciones reales —materiales, altura, mover,
+girar, duplicar, vistas y sol—, con dudas, conflictos y lo que aún no se puede hacer (balcones,
+ventanas, vegetación…). Se previsualiza, se confirma como una revisión del proyecto y se deshace o
+rehace sin volver a consultar. `extrude serve --ai-simulated` añade un proveedor local sin coste.
+Herramientas, límites y privacidad: [docs/EDICION_IA.md](docs/EDICION_IA.md).
 Al aplicar materiales se quitan los colores de capa para no teñir las texturas.
 
 | Zona | Contenido |
@@ -330,6 +339,8 @@ Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para el flujo de cambios.
 | `POST /api/convert?name=plano.dxf&async=1` | Aceptar un trabajo y devolver su ruta de estado |
 | `GET /api/jobs/<id>/status` | Fase, progreso y resultado o error |
 | `GET /api/jobs/<id>/…` | Modelo, informes, YAML, manifest y teselas |
+| `GET /api/library`, `POST /api/models`, `POST /api/jobs/<id>/materials` | Materiales (Fase 2) |
+| `GET /api/tools`, `GET /api/ai/providers`, `POST /api/jobs/<id>/ai/{context,propose,cache/clear}`, `POST /api/jobs/<id>/edit/apply`, `GET /api/jobs/<id>/project`, `POST /api/jobs/<id>/project/{undo,redo}` | Edición con IA y revisiones ([docs/EDICION_IA.md](docs/EDICION_IA.md)) |
 
 El cliente envía `Content-Type: application/octet-stream` y, opcionalmente,
 `X-Extrude-Config` con el YAML en Base64 UTF-8. `tiles` y `compress` son parámetros opcionales.
@@ -385,6 +396,7 @@ docs/       Arquitectura, configuración y formatos de exportación
 
 ## Documentación
 
+- [Guía de uso completa](docs/GUIA_DE_USO.md)
 - [Configuración por capa y fuentes de altura](docs/CONFIG.md)
 - [Formatos de exportación y coordenadas](docs/EXPORT_FORMATS.md)
 - [Arquitectura y decisiones técnicas](docs/ARCHITECTURE.md)

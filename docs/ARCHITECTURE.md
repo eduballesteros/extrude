@@ -87,6 +87,17 @@ cotas válidas dependen de la configuración de cada proyecto.
   y confirmar recargan el GLB del servidor conservando cámara, sol y capas. El catálogo de objetos
   se lee del propio GLB (`_OBJECT_ID`, `_SURFACE`, `extras`). Confirmar crea una revisión
   inmutable (`materials/mat-00N.json`) numerada por el servidor.
+- **Edición con IA** (`ai_planner.py`, `ai_providers.py`, `edit_tools.py`, `glb_edit.py`,
+  `project_edit.py`, `project_state.py`; visor: `materials/ai.ts`, `materials/viewerOps.ts`,
+  `ui/editSection.ts`): la IA solo interpreta y planifica con las herramientas del registro
+  (`edit_tools.TOOLS`, contratos explícitos; lo que falta está en `PLANNED`). El servidor
+  construye el contexto con el estado actual del proyecto (referencias cortas, posiciones
+  relativas, TRS completo de las copias de bloque), hace una única llamada (SDK oficiales con
+  `max_retries=0` tras la interfaz `Provider`), valida el plan y resuelve en código selectores,
+  compatibilidades, conflictos y prioridades. Aplicar es una transacción sobre una copia del GLB
+  (`GlbEditor`: reescribe accesores y compacta el binario) más el plan de materiales; confirmar
+  crea una revisión del proyecto (`project.json`) que deshacer/rehacer recorren. Las vistas y el
+  sol los ejecuta el visor. Detalles en [EDICION_IA.md](EDICION_IA.md).
 - **Herramientas Node** (`tools/`): validador de Khronos y `gltf-transform` se ejecutan con `node`
   directamente (nunca con `npx.cmd` ni shell), con rutas generadas por Extrude.
 - **Visor**: el estado (`viewer/src/state.ts`) es un objeto JSON plano. Los módulos de escena lo
@@ -157,3 +168,20 @@ cotas válidas dependen de la configuración de cada proyecto.
 | @types/node (dev) | Tipos para los tests de integración (Blender, py_compile, gltf-validator) |
 
 TypeScript se fija en 6.0.x porque `typescript-eslint` 8.x aún no admite TS 7.
+
+## Ampliación: edición arquitectónica, maestro editable y modo compartido
+
+- **Herramientas nuevas** (`edit_tools.py`, ejecutadas en `arch_ops.py`, `glb_build.py` y
+  `site_assets.py`): entorno instanciado, ventanas y balcones como elementos alojados (`host`,
+  `facade`), retranqueos con `shapely`, copias independizadas con su TRS horneado, muros y
+  cumbreras de cubiertas inclinadas. Cada herramienta tiene una comprobación de compatibilidad
+  por objeto. La ejecución es transaccional (todo o nada) y se valida con `geometry_check`.
+- **Números estables de copia** (`extras.numbers`): quitar o independizar una copia no renumera
+  las demás, así que las etiquetas «BLOQUE #n.p» identifican siempre la misma copia.
+- **Maestro editable** (`master.py`): toda edición trabaja sobre un GLB sin comprimir y de una
+  pieza (`model.glb` o `model.master.glb`). Teselas, manifest y exportaciones comprimidas se
+  derivan de él en cada revisión (`ProjectState._retile`).
+- **Modo compartido** (`access.py`, `extrude serve --shared`): cuentas con scrypt, sesiones con
+  token Bearer en memoria, `access.json` por trabajo (dueño, editor, lector; sin permiso = 404),
+  revisión base obligatoria en confirmaciones y deshacer, y límites por usuario. No cambia la
+  interfaz de red.

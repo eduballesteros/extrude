@@ -93,10 +93,25 @@ teselas comparten el mismo `origin_offset`, así que se cargan juntas sin despla
   "center_lat": null,
   "center_lon": null,
   "tile_size": 500,
+  "tile_origin": [x0, y0],
+  "compression": null,
+  "master": "model.master.glb",
+  "revision": "rev-003",
   "tiles": [{"id": "0_0", "file": "tiles/tile_0_0.glb", "bbox": {"min": [], "max": []},
-             "triangles": 0, "size_bytes": 0}]
+             "triangles": 0, "size_bytes": 0, "objects": 0}]
 }
 ```
+
+La conversión teselada escribe también `model.master.glb`, el GLB completo sin comprimir sobre
+el que se edita. `tile_origin` (esquina mínima del dibujo, en coordenadas absolutas) y
+`tile_size` fijan la regla de reparto. Cada revisión confirmada, y cada deshacer o rehacer,
+regenera las teselas desde el GLB vigente (con materiales, si los hay) y actualiza `revision`
+y `geometry_revision`. Las teselas regeneradas usan nombres por revisión, por ejemplo
+`tiles/tile_0_0.rev-003.glb`. Las teselas vacías desaparecen del manifest; los archivos de
+revisiones anteriores se conservan para que los manifests ya descargados sigan funcionando.
+La nueva entrega se prepara antes de publicarse y se restauran los archivos anteriores si
+falla su publicación. En las teselas regeneradas, las copias de bloque
+llevan `extras.numbers`, su número estable en el maestro.
 
 ### Catálogo de objetos (`out/objects.json`)
 
@@ -160,9 +175,22 @@ original:
                    "color": "#d8c3a5"},
     "origin": "manual | ai_reviewed", "reason": "…"
   }],
-  "omissions": [{"text": "Carpinterías negras", "reason": "El DWG no tiene carpinterías"}]
+  "omissions": [{"text": "Carpinterías negras", "reason": "El DWG no tiene carpinterías"}],
+  "description": "Texto original (opcional; se puede quitar conservando lo demás)",
+  "ai": {"provider": "anthropic", "model": "claude-opus-5-5", "simulated": false,
+         "promptVersion": "materials-prompt-1", "summary": "…",
+         "explicitRequirements": ["…"], "assumptions": ["…"], "createdAt": "…"}
 }
 ```
+
+`ai` es la trazabilidad opcional de una propuesta de IA revisada (sin credenciales ni contexto
+enviado); las filas que vienen de ella llevan `origin: "ai_reviewed"`. Ver
+[EDICION_IA.md](EDICION_IA.md). `tileSizeM` es el mosaico de textura completo (varias piezas):
+la pieza real es `tileSizeM` / `piecesPerTile` de la biblioteca (`GET /api/library`).
+
+Con ediciones geométricas, el GLB base vigente es `model.current.glb` (revisión geométrica
+nueva en `scene.extras.geometry_revision`, la de la conversión en
+`source_geometry_revision`) y el historial está en `project.json` (ver EDICION_IA.md).
 
 Se rechazan claves desconocidas, NaN/infinito, IDs con otro formato, superficies o materiales
 inexistentes y URLs. `extrude validate-materials materials.json --objects out/objects.json`
@@ -219,6 +247,10 @@ posiciones y para `_OBJECT_ID`:
   los ancestros.
 - **Visor:** el de Extrude decodifica ambos formatos (Draco servido localmente desde
   `public/draco/`).
+- **Edición:** un GLB comprimido se decodifica (`tools/decompress.mjs`: descuantiza, quita las
+  extensiones, hornea transformaciones de nodo y compacta las vistas) a `model.master.glb`, y
+  sobre él se edita. El original no se toca. `GET /api/jobs/<id>/export/<draco|meshopt>`
+  comprime el estado vigente; se guarda por revisión en `exports/`.
 
 ### Validación
 

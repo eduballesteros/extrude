@@ -5,8 +5,11 @@
 **Estado:** Fases 0, 1 y 2 implementadas: IDs persistentes, superficies semánticas,
 `objects.json`, esquema y validación de `materials.json`, UV en metros, biblioteca de 12 presets
 con texturas procedurales, `extrude materialize` y pestaña Materiales del visor (asignación
-manual, previsualizar, descartar, deshacer, confirmar revisiones). Fases 3–5 pendientes
-(interpretación del prompt con IA, exportaciones coherentes, endurecimiento).  
+manual, previsualizar, descartar, deshacer, confirmar revisiones). Fase 3 implementada y
+ampliada a edición del proyecto: petición libre → una llamada a Claude u OpenAI → plan de
+operaciones reales (materiales, altura, mover, girar, duplicar, vistas, sol) con revisiones,
+deshacer y rehacer (ver [EDICION_IA.md](EDICION_IA.md)), probada solo con proveedores simulados. Fases 4–5
+pendientes (exportaciones coherentes, endurecimiento).
 **Entrega propuesta:** primera versión con biblioteca PBR controlada, revisión de asignaciones y GLB autocontenido.
 
 ## 1. Objetivo y resultado esperado
