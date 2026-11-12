@@ -3,7 +3,6 @@ import { defaultState, type Vec3 } from '../state';
 import {
   createView,
   duplicateView,
-  dwgToScene,
   frameRect,
   hiddenLayers,
   moveView,
@@ -45,16 +44,15 @@ function sampleView(name = 'Alzado sur') {
 }
 
 describe('conversión de coordenadas', () => {
-  it('escena ↔ DWG con origen UTM, ida y vuelta', () => {
+  it('escena → DWG con origen UTM y cota', () => {
     const p: Vec3 = [12.5, 7, -3.25];
     const dwg = sceneToDwg(p, ORIGIN);
     expect(dwg).toEqual([230045, 4140018.25, 7]);
-    expect(dwgToScene(dwg, ORIGIN)).toEqual(p);
   });
 
   it('el norte del dibujo (+Y DWG) es −Z en la escena y +Y en Blender', () => {
-    const north = dwgToScene([ORIGIN[0], ORIGIN[1] + 10, 0], ORIGIN);
-    expect(north[2]).toBe(-10);
+    const north: Vec3 = [0, 0, -10];
+    expect(sceneToDwg(north, ORIGIN)).toEqual([ORIGIN[0], ORIGIN[1] + 10, 0]);
     expect(sceneToBlender(north)).toEqual([0, 10, 0]);
   });
 

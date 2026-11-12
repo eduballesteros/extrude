@@ -14,22 +14,6 @@ export function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
 }
 
-function stored(): Theme | null {
-  try {
-    const value = localStorage.getItem(THEME_KEY);
-    return isTheme(value) ? value : null;
-  } catch {
-    return null; // almacenamiento bloqueado (modo privado, políticas): sin preferencia
-  }
-}
-
-/** Preferencia guardada; si no hay, la del sistema; si no se puede saber, claro. */
-export function preferredTheme(): Theme {
-  const saved = stored();
-  if (saved) return saved;
-  return globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
 export function currentTheme(): Theme {
   const value = document.documentElement.dataset['theme'];
   return isTheme(value) ? value : 'light';

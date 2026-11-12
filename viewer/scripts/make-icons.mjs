@@ -1,4 +1,4 @@
-// Compatibilidad: todos los formatos se generan desde make-icons.py.
+// npm run icons delega todos los formatos al generador canónico make-icons.py.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
