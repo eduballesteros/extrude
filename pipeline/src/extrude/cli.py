@@ -143,6 +143,21 @@ def serve(
         list[str] | None, typer.Option(help="Origen permitido por CORS (repetible)")
     ] = None,
     jobs_dir: Annotated[Path | None, typer.Option(help="Carpeta de trabajos")] = None,
+    allowed_host: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="Nombre aceptado en la cabecera Host (repetible). Contra DNS rebinding cuando "
+            "se escucha en todas las interfaces, p. ej. detrás de Caddy en Docker",
+        ),
+    ] = None,
+    trust_forwarded: Annotated[
+        bool,
+        typer.Option(
+            "--trust-forwarded",
+            help="Detrás de un proxy propio: la IP del cliente es la última de X-Forwarded-For "
+            "(límites de acceso por cliente). No lo uses si el servidor es accesible sin proxy",
+        ),
+    ] = False,
     ai_simulated: Annotated[
         bool,
         typer.Option(
@@ -190,6 +205,8 @@ def serve(
                 (jobs_dir or Path(tempfile.gettempdir()) / "extrude-jobs") / "_images",
                 default_image_providers(simulated=ai_simulated),
             ),
+            allowed_hosts=tuple(allowed_host or ()),
+            trust_forwarded=trust_forwarded,
         )
     if mode is not None:
         typer.echo(f"Modo compartido: {len(mode.accounts.names())} usuarios; sesión obligatoria.")

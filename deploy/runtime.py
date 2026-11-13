@@ -55,6 +55,14 @@ def main() -> None:
             origin,
             "--max-mb",
             "100",
+            # Solo el dominio publicado (y la comprobación de salud interna) en Host
+            "--allowed-host",
+            parsed.hostname,
+            "--allowed-host",
+            "127.0.0.1",
+            # La API solo es accesible desde Caddy en la red de Compose: la IP real del
+            # cliente viene en X-Forwarded-For (límites de acceso por cliente)
+            "--trust-forwarded",
         ],
     )
 

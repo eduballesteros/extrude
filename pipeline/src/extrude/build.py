@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import shapely
 from numpy.typing import NDArray
 from shapely.geometry import Polygon
 
@@ -537,6 +538,22 @@ def _check_ground(result: BuildResult, terrain: TerrainSurface) -> None:
                 ground_low[i] = ground_high[i] = 0.0
                 base[i] = rule.base_elevation
                 top[i] = base[i] + (obj.height or 0.0)
+                # …pero el contacto se MIDE en la malla: el punto más bajo de cada XY frente al
+                # terreno (no se da por bueno por haberse generado siguiendo el TIN). Los XY se
+                # agrupan a 0,01 mm: tapa y paredes calculan el mismo punto por caminos distintos.
+                xy, inverse = np.unique(
+                    np.round(obj.mesh.vertices[:, :2], 5), axis=0, return_inverse=True
+                )
+                lower = np.full(len(xy), np.inf)
+                np.minimum.at(lower, inverse.ravel(), obj.mesh.vertices[:, 2])
+                if (obj.height or 0.0) > 0 and obj.footprint is not None:
+                    # Con espesor, el interior solo tiene la cara superior: el contacto se mide
+                    # en el contorno, donde están los pies de las paredes.
+                    edge = shapely.distance(obj.footprint.boundary, shapely.points(xy)) < 1e-6
+                    if edge.any():
+                        xy, lower = xy[edge], lower[edge]
+                clearance = lower - terrain.height(xy)
+                contact_ranges[i] = (float(clearance.min()), float(clearance.max()))
             elif obj.footprint is not None:
                 ground_low[i], ground_high[i] = terrain.range_under(obj.footprint)
             if obj.floor_elevation is not None:

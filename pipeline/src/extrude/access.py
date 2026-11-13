@@ -9,8 +9,10 @@ límites por usuario.
   Quien no tiene permiso recibe 404, igual que si el trabajo no existiera (aislamiento).
 - Concurrencia: toda confirmación lleva la revisión base (`baseRevision` o `?base=`); si otra
   persona confirmó antes, 409 y nada cambia (ver materials_service.StaleRevision).
-- Límites: intentos de acceso fallidos por usuario, trabajos por usuario y consultas de IA por
-  usuario y hora.
+- Límites: intentos de acceso fallidos por cliente y usuario (quien falla desde otra IP no
+  bloquea al dueño de la cuenta) y por cliente en total; trabajos por usuario y consultas de IA
+  por usuario y hora. Los limitadores tienen un máximo de claves: nombres inventados no hacen
+  crecer la memoria sin fin.
 
 El modo compartido NO cambia la interfaz de red: sigue en 127.0.0.1 salvo `--host` explícito.
 """
@@ -128,24 +130,45 @@ class Sessions:
 
 @dataclass
 class Limits:
-    max_failed_logins: int = 5
+    max_failed_logins: int = 5  # por cliente (IP) y usuario
+    max_failed_per_client: int = 30  # por cliente, sea cual sea el usuario
     lockout_s: float = 300
     max_jobs_per_user: int = 50
     max_ai_per_hour: int = 30
 
 
-class RateLimiter:
-    """Ventana deslizante por clave (usuario)."""
+MAX_LIMITER_KEYS = 10_000
 
-    def __init__(self, limit: int, window_s: float) -> None:
+
+class RateLimiter:
+    """Ventana deslizante por clave, con un máximo de claves: al llenarse se purgan las
+    caducadas y, si no basta, las de actividad más antigua."""
+
+    def __init__(self, limit: int, window_s: float, max_keys: int = MAX_LIMITER_KEYS) -> None:
         self.limit = limit
         self.window_s = window_s
+        self.max_keys = max_keys
         self._events: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._events)
+
+    def _make_room(self, now: float) -> None:
+        expired = [k for k, ev in self._events.items() if not ev or ev[-1] < now - self.window_s]
+        for key in expired:
+            del self._events[key]
+        overflow = len(self._events) - self.max_keys + 1
+        if overflow > 0:
+            for key in sorted(self._events, key=lambda k: self._events[k][-1])[:overflow]:
+                del self._events[key]
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
         with self._lock:
+            if key not in self._events and len(self._events) >= self.max_keys:
+                self._make_room(now)
             events = self._events.setdefault(key, deque())
             while events and events[0] < now - self.window_s:
                 events.popleft()
@@ -239,19 +262,27 @@ class SharedMode:
 
     def __post_init__(self) -> None:
         self.failed = RateLimiter(self.limits.max_failed_logins, self.limits.lockout_s)
+        self.failed_clients = RateLimiter(self.limits.max_failed_per_client, self.limits.lockout_s)
         self.ai_calls = RateLimiter(self.limits.max_ai_per_hour, 3600)
 
-    def login(self, user: str, password: str) -> str | None:
-        """Token o None. Tras N fallos seguidos, el usuario queda bloqueado un tiempo (aunque
-        después acierte), sin decir si el usuario existe."""
-        if self.failed.count(user) >= self.limits.max_failed_logins:
+    def login(self, user: str, password: str, client: str = "-") -> str | None:
+        """Token o None, sin decir si el usuario existe. Tras N fallos desde un mismo cliente
+        para un usuario, ese cliente queda bloqueado un tiempo para él (aunque luego acierte);
+        tras M fallos de un cliente con cualquier usuario, el cliente entero. Los fallos de un
+        tercero no bloquean al dueño de la cuenta desde su propio equipo."""
+        key = f"{client}|{user}"
+        if (
+            self.failed.count(key) >= self.limits.max_failed_logins
+            or self.failed_clients.count(client) >= self.limits.max_failed_per_client
+        ):
             raise ExtrudeError(
                 "Demasiados intentos fallidos.", "Espera unos minutos antes de volver a probar."
             )
         if not self.accounts.verify(user, password):
-            self.failed.allow(user)
+            self.failed.allow(key)
+            self.failed_clients.allow(client)
             return None
-        self.failed.reset(user)
+        self.failed.reset(key)
         return self.sessions.create(user)
 
     # Usuario de la petición en curso (para JobStore.create, que no recibe el manejador)
