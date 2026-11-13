@@ -13,9 +13,25 @@ El conversor y el visor se arrancan en terminales separadas con `just serve` y `
 Los modelos de ejemplo se copian automáticamente. Para procesar DWG instala ODA o LibreDWG;
 las pruebas sintéticas trabajan principalmente con DXF.
 
+## Ramas y versiones
+
+- **`main` siempre es desplegable.** Solo recibe código por pull request, con la integración
+  continua en verde (`check.yml`; `deploy-check.yml` se dispara si cambian el despliegue, el
+  pipeline, las herramientas o el visor). No se hacen commits directos en `main`.
+- **Una rama corta por tarea**, creada desde `main` y fusionada en pocos días. El prefijo dice
+  qué es: `feat/altura-por-capa`, `fix/edificios-flotantes`, `docs/guia-web`,
+  `deploy/compose`. Una rama no acumula tareas distintas: si aparece otra, sale otra rama.
+- **Las versiones son etiquetas** sobre `main` (`v0.2.0`), no ramas. El despliegue usa una
+  `EXTRUDE_RELEASE` distinta por versión (ver `deploy/README.md`): la etiqueta identifica qué
+  código lleva cada imagen y a cuál volver.
+- No hay rama `develop`: con ramas cortas y `main` protegida no hace falta un segundo tronco.
+
+Antes de etiquetar, pasa a una sección con el número de versión lo acumulado en «Sin
+publicar» del changelog.
+
 ## Preparar un cambio
 
-1. Crea una rama con un nombre que describa el cambio.
+1. Crea una rama desde `main` con el prefijo y un nombre que describa el cambio.
 2. Mantén las modificaciones centradas en un problema o funcionalidad.
 3. Para fallos de geometría, añade un DXF sintético mínimo en una prueba; no incluyas planos privados.
 4. Verifica con `just check` y `npm run build --prefix viewer`.
