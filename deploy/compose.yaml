@@ -14,7 +14,7 @@ services:
       - accounts:/data/accounts
     read_only: true
     tmpfs:
-      - /tmp:size=536870912,uid=10001,gid=10001,mode=1770
+      - '/tmp:size=536870912,uid=10001,gid=10001,mode=1770'
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     init: true
@@ -47,7 +47,8 @@ services:
       - certificates:/data
       - caddy_config:/config
     read_only: true
-    tmpfs: [/tmp:size=16777216,uid=10001,gid=10001]
+    tmpfs:
+      - '/tmp:size=16777216,uid=10001,gid=10001'
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     cpus: 1

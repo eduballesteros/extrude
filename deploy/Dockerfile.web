@@ -9,7 +9,10 @@ RUN npm run build && test -s dist/guia.html \
     && find dist/assets -name '*.woff2' | grep -q .
 
 FROM caddy:2.10.2-alpine
-RUN mkdir -p /data/caddy /config/caddy && chown -R 10001:10001 /data /config
+# Se escucha en 8080/8443: no hace falta la capability del binario oficial.
+# Con cap_drop: ALL, conservarla provoca EPERM al ejecutar Caddy.
+RUN setcap -r /usr/bin/caddy \
+    && mkdir -p /data/caddy /config/caddy && chown -R 10001:10001 /data /config
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=viewer-build /build/viewer/dist /srv
 USER 10001:10001
