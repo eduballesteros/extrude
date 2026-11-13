@@ -720,3 +720,77 @@ kbd {
     padding-top: 14px;
   }
 }
+
+/* Propuesta Estudio: misma jerarquía y superficies que el espacio de trabajo. */
+@media screen {
+  .g-top {
+    background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+    box-shadow: var(--e0);
+  }
+
+  .g-btn {
+    min-height: 38px;
+    border-radius: 8px;
+  }
+
+  .g-hero {
+    background-size:
+      auto,
+      48px 48px,
+      48px 48px;
+  }
+
+  .g-eyebrow,
+  .g-flow li::before {
+    color: var(--accent);
+  }
+
+  .guide .g-start-card {
+    padding: 22px;
+    border-radius: 12px;
+    box-shadow: var(--e0);
+  }
+
+  .g-toc a {
+    padding-block: 8px;
+  }
+
+  .g-toc a.is-active {
+    border-left-color: var(--accent);
+    background: var(--accent-muted);
+  }
+
+  .g-content h2 {
+    letter-spacing: -0.035em;
+  }
+
+  .g-card,
+  .g-table,
+  .g-faq details,
+  .g-platform,
+  .g-content pre {
+    border-radius: 12px;
+    box-shadow: var(--e0);
+  }
+
+  .g-table td {
+    padding-block: 12px;
+  }
+
+  .g-faq summary {
+    padding: 14px 16px;
+  }
+
+  .g-faq details[open] {
+    border-color: var(--border-active);
+  }
+
+  .g-callout {
+    line-height: 1.7;
+  }
+
+  .g-top-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
