@@ -402,7 +402,7 @@ def test_solids_off_the_terrain_are_warned(
     result = build_scene(read_dxf(_site(tmp_path, terrain_z0)), _site_rules())
     (warning,) = [w for w in result.warnings if "no usan base_from_terrain" in w]
     assert "EDIF" in warning and "VERDE" in warning
-    assert "base_from_terrain: true" in warning
+    assert "base_auto: true" in warning and "Revisar apoyo" in warning
     for layer in ("EDIF", "VERDE"):
         check = result.layers[layer].stats.ground
         assert check is not None
@@ -441,6 +441,8 @@ def test_ground_check_goes_to_glb_and_report(tmp_path: Path) -> None:
         "buried": 0,
         "intersecting": 0,
         "partially_buried": 0,
+        "partial_gap": 0,
+        "unverified": 0,
     }
     assert checks["CURVAS"] is None  # el terreno no se comprueba contra sí mismo
     assert result.report["layers"]["EDIF"]["ground_check"] == checks["EDIF"]

@@ -112,6 +112,8 @@ def test_default_building_keeps_height_and_adds_support(tmp_path: Path) -> None:
         "buried": 0,
         "intersecting": 0,
         "partially_buried": 0,
+        "partial_gap": 0,
+        "unverified": 0,
     }
     (detail,) = layer.stats.ground_details
     assert detail["category"] == "foundation"
@@ -195,6 +197,8 @@ def test_zero_height_building_over_interior_valley_is_a_terrain_surface(
         "buried": 0,
         "intersecting": 0,
         "partially_buried": 0,
+        "partial_gap": 0,
+        "unverified": 0,
     }
     assert (tmp_path / "out" / "model.glb").is_file()
 

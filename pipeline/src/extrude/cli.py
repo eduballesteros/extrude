@@ -165,6 +165,7 @@ def serve(
     """Servidor local para que el visor convierta DWG/DXF arrastrándolos."""
     from extrude.access import AccessControl, Accounts, SharedMode
     from extrude.ai_planner import AiService, default_providers
+    from extrude.image_gen import ImageService, default_image_providers
 
     origins = tuple(origin) if origin else DEFAULT_ORIGINS
     ai = AiService(default_providers(simulated=ai_simulated))
@@ -185,12 +186,19 @@ def serve(
             allowed_origins=origins,
             ai=ai,
             shared=mode,
+            images=ImageService(
+                (jobs_dir or Path(tempfile.gettempdir()) / "extrude-jobs") / "_images",
+                default_image_providers(simulated=ai_simulated),
+            ),
         )
     if mode is not None:
         typer.echo(f"Modo compartido: {len(mode.accounts.names())} usuarios; sesión obligatoria.")
     for entry in ai.providers_payload()["providers"]:
         state = "listo" if entry["available"] else f"no disponible: {entry['reason']}"
         typer.echo(f"IA {entry['name']} ({entry['model'] or 'sin modelo'}): {state}")
+    for entry in default_image_providers(simulated=ai_simulated).values():
+        reason = entry.available()
+        typer.echo(f"Imágenes {entry.name}: {'listo' if reason is None else reason}")
     typer.echo(f"Extrude escuchando en http://{host}:{port} (orígenes: {', '.join(origins)})")
     typer.echo("Abre el visor y arrastra un .dwg o .dxf. Ctrl+C para salir.")
     try:

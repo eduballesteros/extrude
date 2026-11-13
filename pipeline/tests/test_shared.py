@@ -253,3 +253,19 @@ def test_other_users_cannot_prune_owned_projects(
     assert call(server, path, bea)[0] == 404
     assert shared.access.owned_by("ana") == 1
     assert shared.access.owned_by("bea") == 12
+
+
+def test_public_health_identifies_the_code_without_process_details(server: str) -> None:
+    """En un servidor con cuentas `/api/health` no exige sesión: dice qué código corre (para
+    detectar un proceso desfasado), pero no el PID."""
+    code, health = call(server, "/api/health")
+    assert code == 200 and health["build"]["stale"] is False
+    assert set(health["build"]) == {"id", "source", "stale", "started"}
+
+
+def test_project_list_needs_a_session_and_only_shows_own_projects(
+    server: str, base_glb: bytes
+) -> None:
+    assert call(server, "/api/projects")[0] == 401
+    ana = login(server, "ana")
+    assert call(server, "/api/projects", ana)[1] == {"projects": []}

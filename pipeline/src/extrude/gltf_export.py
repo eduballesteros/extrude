@@ -31,6 +31,7 @@ from extrude import __version__
 from extrude.build import LineObject, SceneObject
 from extrude.config import Kind, LayerRule, Material
 from extrude.extrusion import MeshData, box_corners
+from extrude.heights import confidence
 from extrude.instancing import InstanceGroup, Matrix, decompose_trs, transform
 
 AXIS_TRANSFORM_DOC = "(x, y, z)_dwg -> (x, z, -y)_gltf"
@@ -502,6 +503,10 @@ def _object_table(objects: Sequence[SceneObject], rule: LayerRule) -> dict[str, 
         ],
         "foundation_height": [round(o.foundation_height, 3) for o in objects],
         "height_origin": [o.height_origin.value if o.height_origin else None for o in objects],
+        "height_confidence": [
+            confidence(o.height_origin) if o.height_origin else None for o in objects
+        ],
+        "base_origin": [o.base_origin for o in objects],
         "source_type": [o.source_type for o in objects],
         "handle": [
             o.handles[0]

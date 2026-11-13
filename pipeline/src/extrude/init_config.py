@@ -1,8 +1,17 @@
 """Borrador de configuración YAML a partir de un dibujo concreto (`extrude init-config`).
 
-Es una propuesta para revisar a mano, no una verdad: adivina el `kind` por el nombre de la capa
-y la fuente de altura según lo que encuentre (atributos, textos con número, cotas Z). Cada regla
+Es una propuesta para revisar, no una verdad: adivina el `kind` por el nombre de la capa y la
+fuente de altura según lo que encuentre (atributos, textos con número, cotas Z). Cada regla
 lleva comentarios con la evidencia usada.
+
+Política de cotas (general, no depende de ningún plano concreto):
+- La base de lo que se extruye se deja en `base_auto`: se decide al convertir, por objeto, con
+  el terreno realmente triangulable (no con el nombre de una capa).
+- Una cota Z en una huella no demuestra por sí sola ni base ni cubierta ni altura. Solo se
+  propone como altura (`height_from: elevation`) cuando no hay terreno ni otra fuente.
+- Sin fuente de altura fiable se usa `default_height`, que es PROVISIONAL y así se informa.
+- Una capa de nombre no reconocido queda en `ignore`; si tiene geometría convertible se
+  anota como pendiente de revisión (el informe y el visor la muestran).
 """
 
 from __future__ import annotations
@@ -12,12 +21,23 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import shapely
 import yaml
+from numpy.typing import NDArray
 from shapely.geometry import Point, Polygon
 
-from extrude.config import DEFAULT_MATERIALS, Kind, parse_config
+from extrude.build import terrain_from_samples
+from extrude.classification import guess_kind
+from extrude.config import (
+    DEFAULT_MATERIALS,
+    DEFAULT_TOLERANCE_M,
+    EXTRUDED_KINDS,
+    Kind,
+    parse_config,
+)
 from extrude.model import (
+    METERS_PER_UNIT,
     HatchFeature,
     MeshFeature,
     PointFeature,
@@ -26,13 +46,6 @@ from extrude.model import (
     TextFeature,
 )
 
-KIND_KEYWORDS: tuple[tuple[Kind, tuple[str, ...]], ...] = (
-    (Kind.TERRAIN, ("CURVA", "NIVEL", "COTA", "TOPO", "TERREN", "CONTOUR", "TERRAIN")),
-    (Kind.BUILDING, ("EDIF", "CONSTR", "BUILD", "MANZ", "PARCEL", "VIVIEND", "BLOQUE", "EQUIPAM")),
-    (Kind.ROAD, ("VIAL", "CALLE", "CALZ", "ACERA", "ROAD", "STREET", "CARRET", "APARC")),
-    (Kind.WATER, ("AGUA", "RIO", "LAGO", "WATER", "FUENTE", "PISCIN", "CAUCE")),
-    (Kind.VEGETATION, ("VEGET", "ARBOL", "JARDIN", "VERDE", "PARQUE", "TREE", "CESPED")),
-)
 HEIGHT_ATTRIBUTE = re.compile(r"PLANT|ALTUR|NIVEL|FLOOR|STOREY|HEIGHT|N_?PL", re.IGNORECASE)
 DEFAULT_BUILDING_HEIGHT_M = 9.0
 DEFAULT_BLOCK_FLOORS = 3
@@ -72,20 +85,19 @@ class _LayerInfo:
     seen_inserts: set[str] = field(default_factory=set)
     has_points: bool = False
     outlines: list[Polygon] = field(default_factory=list)
+    hatches: int = 0
+    meshes: int = 0
+    # Muestras acotadas (curvas, puntos y vértices de mallas) por si la capa es terreno
+    samples: list[NDArray[np.float64]] = field(default_factory=list)
+
+    @property
+    def convertible(self) -> int:
+        return len(self.outlines) + self.hatches + self.meshes
 
 
 def _glob_escape(layer: str) -> str:
     """Nombre literal de capa como patrón glob (escapa * ? [)."""
     return re.sub(r"([*?[])", r"[\1]", layer)
-
-
-def _guess_kind(layer: str) -> Kind:
-    """Por prefijo de cada palabra de la capa: 'ZONAS_VERDES' → VERDE, 'MOBILIARIO' ≠ RIO."""
-    tokens = [t for t in re.split(r"[\W_]+", layer.upper()) if t]
-    for kind, words in KIND_KEYWORDS:
-        if any(t.startswith(w) for t in tokens for w in words):
-            return kind
-    return Kind.IGNORE
 
 
 def _collect(read: ReadResult) -> tuple[dict[str, _LayerInfo], list[TextFeature]]:
@@ -95,6 +107,7 @@ def _collect(read: ReadResult) -> tuple[dict[str, _LayerInfo], list[TextFeature]
         if isinstance(f, PointFeature):
             layers[f.layer].has_points = True
             layers[f.layer].geometry["POINT"] += 1
+            layers[f.layer].samples.append(f.position.reshape(1, 3))
             continue
         if isinstance(f, TextFeature):
             texts.append(f)
@@ -113,7 +126,15 @@ def _collect(read: ReadResult) -> tuple[dict[str, _LayerInfo], list[TextFeature]
             ):
                 info.seen_inserts.add(insert.handle)
                 info.blocks[f.source.block_path[-1]] += 1
+            if isinstance(f, HatchFeature):
+                info.hatches += 1
+            if isinstance(f, MeshFeature):
+                info.meshes += 1
+                info.samples.append(f.vertices)
+                if abs(f.vertices[:, 2]).max() > 0:
+                    info.has_elevation = True
             if isinstance(f, PolylineFeature):
+                info.samples.append(f.points)
                 if abs(f.points[:, 2]).max() > 0:
                     info.has_elevation = True
                 if f.closed and len(f.points) >= MIN_OUTLINE_POINTS:
@@ -184,14 +205,19 @@ def _building_rule(
         listed = ", ".join(f"{n} ×{c}" for n, c in info.blocks.most_common())
         notes.append(f"Los edificios son bloques ({listed}).")
         notes.append("AJUSTA block_values: plantas de cada tipo de bloque (valor provisional).")
-    elif info.has_elevation:
+    elif info.has_elevation and not has_terrain:
         rule["height_from"] = "elevation"
-        notes.append("Las polilíneas tienen cota Z: se usa como altura de coronación.")
+        notes.append(
+            "Las polilíneas tienen cota Z y no hay terreno ni otra fuente de altura: se "
+            "interpreta como cota de cubierta sobre la cota 0 (INFERENCIA: compruébalo)."
+        )
+    elif info.has_elevation:
+        notes.append(
+            "Con terreno, la cota Z de una huella no demuestra una altura de edificio: "
+            "se usa default_height PROVISIONAL; revisa plantas o altura."
+        )
     else:
-        notes.append("No se encontró altura en el dibujo: se usa default_height.")
-    if info.has_elevation and rule.get("height_from") != "elevation" and not has_terrain:
-        rule["base_from_elevation"] = True
-        notes.append("Las plantas tienen cota Z: se usa como cota de la base de cada edificio.")
+        notes.append("No se encontró altura en el dibujo: se usa default_height (PROVISIONAL).")
     rule["floor_height"] = 3.0
     rule["default_height"] = DEFAULT_BUILDING_HEIGHT_M
     return rule, notes
@@ -204,23 +230,32 @@ def _material(kind: Kind) -> dict[str, Any]:
 
 def draft_config(read: ReadResult, display_name: str | None = None) -> str:
     layers, texts = _collect(read)
-    terrain_layers = [
-        name
-        for name, info in sorted(layers.items())
-        if _guess_kind(name) is Kind.TERRAIN and (info.has_elevation or info.has_points)
-    ]
+    # Terreno: solo cuenta si de verdad se puede triangular con cotas (no por el nombre)
+    named_terrain = [name for name in sorted(layers) if guess_kind(name) is Kind.TERRAIN]
+    surface, terrain_info = terrain_from_samples(
+        [s for name in named_terrain for s in layers[name].samples],
+        METERS_PER_UNIT[read.units],
+        DEFAULT_TOLERANCE_M,
+    )
+    has_terrain = surface is not None
+    terrain_layers = named_terrain if has_terrain else []
     blocks: list[str] = []
     for layer, info in sorted(layers.items()):
-        kind = _guess_kind(layer)
+        kind = guess_kind(layer)
         counts = ", ".join(f"{t}×{n}" for t, n in sorted(info.geometry.items()))
         notes = [f"Capa {layer}: {counts}"]
         if kind is Kind.BUILDING:
-            rule, extra = _building_rule(layer, info, texts, has_terrain=bool(terrain_layers))
+            rule, extra = _building_rule(layer, info, texts, has_terrain=has_terrain)
             notes += extra
         else:
             if kind is Kind.TERRAIN and not (info.has_elevation or info.has_points):
                 kind = Kind.IGNORE
                 notes.append("Parece terreno pero no tiene cotas Z: no sirve para el TIN.")
+            elif kind is Kind.TERRAIN and not has_terrain:
+                notes.append(
+                    f"Parece terreno, pero no forma una superficie utilizable: "
+                    f"{terrain_info['reason']}. Nada se apoyará en él."
+                )
             rule = {"match": _glob_escape(layer), "kind": kind.value}
             if kind in KIND_DEFAULT_HEIGHT:
                 rule["height"] = KIND_DEFAULT_HEIGHT[kind]
@@ -229,23 +264,34 @@ def draft_config(read: ReadResult, display_name: str | None = None) -> str:
                 rule["detect_holes"] = False
                 listed = ", ".join(f"{n} ×{c}" for n, c in info.blocks.most_common())
                 notes.append(f"Bloques de árbol ({listed}): volumen de {TREE_BLOCK_HEIGHT_M:g} m.")
-            if kind is Kind.IGNORE:
-                notes.append("Nombre no reconocido: revisa si debe ser building/road/water/…")
-        if (
-            terrain_layers
-            and kind not in (Kind.IGNORE, Kind.TERRAIN, Kind.LINE)
-            and not rule.get("base_from_elevation")
-            and rule.get("height_from") != "elevation"
-        ):
-            rule["base_from_terrain"] = True
-            on = ", ".join(terrain_layers)
-            if kind is Kind.BUILDING and info.has_elevation:
+            if kind is Kind.IGNORE and guess_kind(layer) is Kind.IGNORE:
+                if info.convertible:
+                    notes.append(
+                        f"PENDIENTE DE REVISIÓN: nombre no reconocido, pero contiene "
+                        f"{info.convertible} elementos convertibles (contornos cerrados, "
+                        "sombreados o mallas). Decide su tipo en el visor (Capas) o aquí."
+                    )
+                else:
+                    notes.append("Nombre no reconocido: revisa si debe ser building/road/water/…")
+        if kind in EXTRUDED_KINDS:
+            # La base se decide al convertir, por objeto, con la evidencia real (ver build.py)
+            rule["base_auto"] = True
+            if has_terrain:
+                on = ", ".join(terrain_layers)
+                if kind is Kind.BUILDING and info.has_elevation:
+                    notes.append(
+                        "Apoyo automático: la cota Z de las huellas no garantiza una base "
+                        f"fiable; cada objeto se apoya en el terreno ({on})."
+                    )
+                else:
+                    notes.append(f"Apoyo automático: cada objeto se apoya en el terreno ({on}).")
+            elif info.has_elevation and rule.get("height_from") != "elevation":
                 notes.append(
-                    "La presencia de cotas Z no garantiza bases fiables en toda la capa: "
-                    f"se apoya en el terreno ({on})."
+                    "Apoyo automático: no hay terreno utilizable; la base de cada objeto es la "
+                    "cota Z de su huella (INFERENCIA) o la cota 0 si no tiene."
                 )
             else:
-                notes.append(f"Sin cota de base propia: se apoya en el terreno ({on}).")
+                notes.append("Apoyo automático: no hay terreno utilizable; la base es la cota 0.")
         if kind is not Kind.IGNORE:
             rule["material"] = _material(kind)
         blocks.append(_render_rule(rule, notes))
@@ -280,3 +326,6 @@ def _render_rule(rule: dict[str, Any], notes: list[str]) -> str:
     body = yaml.safe_dump([rule], sort_keys=False, allow_unicode=True, width=200)
     comments = "".join(f"  # {n}\n" for n in notes)
     return comments + "".join(f"  {line}\n" for line in body.splitlines())
+
+
+_guess_kind = guess_kind  # nombre anterior (pruebas y código externo)
