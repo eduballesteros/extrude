@@ -57,6 +57,8 @@ const FIELD_LABELS: Record<string, string> = {
   floors: 'Plantas',
   base: 'Cota base (m)',
   height_origin: 'Origen de la altura',
+  height_confidence: 'Fiabilidad de la altura',
+  base_origin: 'Origen de la base',
   foundation_height: 'Zócalo automático (m)',
   source_type: 'Tipo DXF',
   handle: 'Handle',

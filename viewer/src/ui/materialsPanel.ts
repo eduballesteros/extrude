@@ -325,6 +325,12 @@ export class MaterialsPanel {
     );
   }
 
+  /** Revisión con materiales o ediciones confirmados (se perdería al reconvertir), o null. */
+  get confirmedProjectRevision(): string | null {
+    const revision = this.ai.revision;
+    return revision && revision !== 'rev-000' ? revision : null;
+  }
+
   /** El modelo actual procede de este trabajo del servidor (conversión desde el visor). */
   setJob(job: string | null, baseUrl: string | null): void {
     this.job = job;

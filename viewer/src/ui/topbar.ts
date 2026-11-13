@@ -23,6 +23,8 @@ interface MenuItem {
 export interface TopBarHandlers {
   onClose: () => void;
   onToggleZen: () => void;
+  /** Abre la biblioteca de vistas e imágenes del proyecto. */
+  onOpenLibrary: () => void;
 }
 
 /**
@@ -49,6 +51,7 @@ export class TopBar {
   private readonly menu = h('div', { class: 'menu', hidden: true, attrs: { role: 'menu' } });
   private readonly measureButton: HTMLButtonElement;
   private readonly themeButton: HTMLButtonElement;
+  private readonly libraryCount = h('span', { class: 'tab-count' });
   private downloads: DownloadLink[] = [];
 
   constructor(
@@ -129,6 +132,7 @@ export class TopBar {
       h(
         'div',
         { class: 'topbar-right' },
+        this.libraryButton(handlers),
         button({
           label: 'Guía',
           icon: 'info',
@@ -163,6 +167,25 @@ export class TopBar {
       this.measureButton.classList.toggle('is-active', app.measure.active);
       this.measureButton.setAttribute('aria-pressed', String(app.measure.active));
     });
+  }
+
+  private libraryButton(handlers: TopBarHandlers): HTMLButtonElement {
+    const el = button({
+      label: 'Biblioteca',
+      icon: 'image',
+      title: 'Biblioteca de vistas e imágenes del proyecto: capturas del visor y generadas por IA',
+      variant: 'ghost',
+      size: 'sm',
+      onClick: handlers.onOpenLibrary,
+    });
+    el.classList.add('library-button');
+    el.append(this.libraryCount);
+    return el;
+  }
+
+  /** Número de imágenes de la biblioteca del proyecto (junto al botón). */
+  setLibraryCount(count: number): void {
+    this.libraryCount.textContent = count ? String(count) : '';
   }
 
   setModel(model: LoadedModel): void {

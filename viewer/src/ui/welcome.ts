@@ -81,6 +81,9 @@ export class WelcomeScreen {
   private readonly cancelButton: HTMLButtonElement;
   private readonly retryButton: HTMLButtonElement;
   private readonly destinationConsent: HTMLInputElement | null;
+  private readonly recentButton: HTMLButtonElement;
+  private onRecent: (() => void) | null = null;
+  private readonly projects = h('div', { class: 'welcome-projects', hidden: true });
   private busy = false;
 
   constructor(handlers: WelcomeHandlers, destination = new ConversionDestination(null)) {
@@ -174,6 +177,13 @@ export class WelcomeScreen {
     this.retryButton = button({ label: 'Reintentar', onClick: () => handlers.onRetry?.() });
     this.retryButton.hidden = true;
 
+    this.recentButton = button({
+      icon: 'refresh',
+      variant: 'secondary',
+      onClick: () => this.onRecent?.(),
+    });
+    this.recentButton.classList.add('welcome-recent');
+    this.recentButton.hidden = true;
     const gallery = h('div', { class: 'samples' });
     for (const sample of SAMPLE_MODELS) {
       const card = h(
@@ -262,6 +272,8 @@ export class WelcomeScreen {
           this.progress,
           this.error,
           this.retryButton,
+          this.recentButton,
+          this.projects,
           h('div', { class: 'samples-label', textContent: 'O prueba con un ejemplo' }),
           gallery,
         ),
@@ -288,6 +300,56 @@ export class WelcomeScreen {
 
   setDragging(active: boolean): void {
     this.dropzone.classList.toggle('is-dragging', active);
+  }
+
+  /** Ofrece reabrir el último proyecto convertido (sigue en el servidor); null lo quita. */
+  setRecent(name: string | null, onOpen?: () => void): void {
+    this.recentButton.hidden = name === null;
+    this.onRecent = onOpen ?? null;
+    const label = `Reabrir el último proyecto: ${name ?? ''}`;
+    this.recentButton.replaceChildren(icon('refresh'), h('span', { textContent: label }));
+    this.recentButton.title =
+      'Vuelve a cargar el proyecto desde el servidor, con su configuración, sus vistas y sus imágenes';
+  }
+
+  /**
+   * Proyectos que conserva el servidor: se reabren sin volver a subir el plano. Los que tienen
+   * objetos mal apoyados o son de una versión anterior se señalan para revisarlos.
+   */
+  setProjects<
+    T extends {
+      job: string;
+      name: string;
+      modified: string;
+      floating: number;
+      buried: number;
+      outdated: boolean;
+    },
+  >(projects: T[], onOpen: (project: T) => void): void {
+    this.projects.hidden = projects.length === 0;
+    this.projects.replaceChildren(
+      h('div', { class: 'samples-label', textContent: 'Proyectos en el servidor' }),
+    );
+    for (const project of projects.slice(0, 6)) {
+      const issues = project.floating + project.buried;
+      const flag = issues ? `${issues} mal apoyados` : project.outdated ? 'revisar' : '';
+      const entry = h(
+        'button',
+        {
+          type: 'button',
+          class: 'welcome-project',
+          title: 'Reabrir desde el servidor, con su configuración, sus vistas y sus imágenes',
+        },
+        h('span', { class: 'welcome-project-name', textContent: project.name }),
+        h('span', {
+          class: 'welcome-project-date mono',
+          textContent: project.modified.replace('T', ' ').slice(0, 16),
+        }),
+        flag ? h('span', { class: 'lib-badge is-warn', textContent: flag }) : null,
+      );
+      entry.addEventListener('click', () => onOpen(project));
+      this.projects.append(entry);
+    }
   }
 
   setConfig(name: string | null): void {

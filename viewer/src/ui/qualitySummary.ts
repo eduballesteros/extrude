@@ -1,10 +1,13 @@
 import type { ConvertResponse } from '../convert/client';
 import { summarizeQuality } from '../convert/report';
-import { h } from './dom';
+import { button, h } from './dom';
 
 /** Resumen persistente y plegable, ligado al modelo convertido actualmente abierto. */
 export class QualitySummary {
   readonly element = h('details', { class: 'quality-summary', hidden: true });
+
+  /** `onReview`: lleva a la revisión del proyecto (pestaña Capas). */
+  constructor(private readonly onReview?: () => void) {}
 
   clear(): void {
     this.element.hidden = true;
@@ -17,20 +20,31 @@ export class QualitySummary {
     const row = (label: string, value: string | number): void => {
       rows.append(h('dt', { textContent: label }), h('dd', { textContent: String(value) }));
     };
+    if (quality.summaryAvailable) {
+      // Lo que el modelo contiene y lo que NO: los recuentos de apoyo solo hablan de lo convertido
+      row('Objetos convertidos', quality.convertedObjects);
+      row('Capas no convertidas', quality.ignoredLayers);
+      row('Capas pendientes de revisión', quality.pendingLayers);
+      row('Elementos sin interpretar', quality.pendingElements);
+    }
     if (quality.available) {
-      row('Alturas por defecto', quality.defaultHeights);
+      row('Alturas provisionales (por defecto)', quality.defaultHeights);
+      if (quality.inferredHeights) row('Alturas inferidas de una cota', quality.inferredHeights);
       row('Alturas ambiguas', quality.ambiguous);
       row('Sin altura · descartados', quality.dropped);
       row('Rótulos junto a fachada', quality.nearby);
       if (quality.groundAvailable) {
         row('Sólidos comprobados', quality.checked);
         row('Flotan completamente', quality.floating);
+        row('Contacto solo parcial', quality.partialGap);
+        if (quality.unverified) row('Contacto sin verificar', quality.unverified);
         row('Enterrados completamente', quality.buried);
         row('Intersecan la ladera', quality.intersecting);
         row('Enterrados parcialmente', quality.partiallyBuried);
         if (quality.coverageAvailable) row('Huellas fuera del terreno TIN', quality.extrapolated);
         if (quality.foundations) {
           row('Edificios con zócalo automático', quality.foundations);
+          row('Zócalos de más de 3 m', quality.highFoundations);
           row('Zócalo máximo', `${quality.maxFoundationHeight.toFixed(2)} m`);
         }
       }
@@ -59,6 +73,47 @@ export class QualitySummary {
       }
     }
     const notes = h('div', { class: 'quality-notes' });
+    const needsReview =
+      quality.floating +
+        quality.buried +
+        quality.partialGap +
+        quality.pendingLayers +
+        quality.highFoundations +
+        quality.defaultHeights >
+      0;
+    if (quality.pendingLayers) {
+      notes.append(
+        h('p', {
+          class: 'quality-pending',
+          textContent: `Hay ${quality.pendingLayers} capas sin convertir que contienen geometría (${quality.pendingNames.slice(0, 4).join(', ')}${quality.pendingNames.length > 4 ? '…' : ''}). No están en el modelo: «0 flotantes» se refiere solo a lo convertido.`,
+        }),
+      );
+    }
+    if (quality.defaultHeights) {
+      notes.append(
+        h('p', {
+          textContent: `${quality.defaultHeights} edificios tienen una altura provisional: el plano no la indica. Fíjala por capa en la pestaña Capas.`,
+        }),
+      );
+    }
+    if (quality.terrainStatus === 'invalid') {
+      notes.append(
+        h('p', {
+          textContent: `El terreno no sirve para apoyar: ${quality.terrainReason ?? 'no se puede triangular'}.`,
+        }),
+      );
+    }
+    if (this.onReview && needsReview) {
+      notes.append(
+        button({
+          label: 'Revisar apoyo y capas',
+          icon: 'check',
+          variant: 'secondary',
+          size: 'sm',
+          onClick: () => this.onReview?.(),
+        }),
+      );
+    }
     if (quality.extrapolated) {
       notes.append(
         h('p', {
@@ -124,9 +179,20 @@ export class QualitySummary {
       h('summary', {
         textContent: `Calidad de la conversión · ${result.report.warnings.length} ${result.report.warnings.length === 1 ? 'aviso' : 'avisos'}`,
       }),
-      h('div', { class: 'quality-body' }, links, rows, notes),
+      h('div', { class: 'quality-body' }, links, rows, notes, revisionLine(result)),
     );
     this.element.open = true;
     this.element.hidden = false;
   }
+}
+
+/** Revisión de la geometría del resultado mostrado y código del servidor que lo generó. */
+function revisionLine(result: ConvertResponse): HTMLElement | null {
+  const revision = result.revision ?? result.report.geometry_revision;
+  if (!revision) return null;
+  return h('p', {
+    class: 'quality-revision mono',
+    textContent: `Revisión ${revision.replace(/^sha256:/, '').slice(0, 12)}${result.build ? ` · servidor ${result.build}` : ''}`,
+    title: revision,
+  });
 }

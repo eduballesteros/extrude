@@ -1,6 +1,7 @@
 import {
   type Box3,
   Group,
+  Matrix4,
   type Mesh,
   type Object3D,
   Raycaster,
@@ -16,6 +17,7 @@ import { misplacedLayers, misplacedMessage } from './scene/groundCheck';
 import { MeasureTool } from './scene/measure';
 import { Ground } from './scene/ground';
 import { ObjectHighlight } from './scene/highlight';
+import { LayerHighlight } from './scene/layerHighlight';
 import { LayerManager } from './scene/layers';
 import { SceneLighting } from './scene/lighting';
 import { ExtraLights, newLightState } from './scene/lights';
@@ -28,6 +30,7 @@ import {
   nextFrame,
   type ProgressCallback,
 } from './scene/loader';
+import { Loupe, snapHit, type SnapResult, toScreen } from './scene/loupe';
 import { boundsOf, Navigation, type ViewPreset } from './scene/navigation';
 import { describeHit, firstVisibleHit } from './scene/picking';
 import { composeIso, geolocate, splitIso } from './scene/sun';
@@ -41,6 +44,21 @@ const CLICK_TOLERANCE_PX = 4;
 /** Altura sobre la superficie a la que se coloca una luz nueva (m). */
 const LIGHT_PLACEMENT_OFFSET_M = 3;
 const LINE_PICK_THRESHOLD_M = 0.5;
+/** Rayos vecinos (px) que se prueban cuando el cursor de medida no toca geometría. */
+const NEAR_MISS_OFFSETS: readonly (readonly [number, number])[] = [
+  [-5, 0],
+  [5, 0],
+  [0, -5],
+  [0, 5],
+  [-4, -4],
+  [4, -4],
+  [-4, 4],
+  [4, 4],
+  [-9, 0],
+  [9, 0],
+  [0, -9],
+  [0, 9],
+];
 
 export interface DayAnimation {
   playing: boolean;
@@ -89,6 +107,15 @@ export class App {
   selectedObjectId: string | null = null;
   /** Cajas de los objetos afectados por una propuesta de materiales (no cambia el modelo). */
   readonly highlight = new ObjectHighlight();
+  /** Capa seleccionada en el panel de capas: sus elementos se tiñen en el modelo. */
+  selectedLayer: string | null = null;
+  private readonly layerHighlight = new LayerHighlight();
+  /** Lupa junto al cursor mientras se coloca un punto de medida. */
+  private readonly loupe: Loupe;
+  private pointer: { x: number; y: number } | null = null;
+  private pointerDirty = false;
+  private snap: SnapResult | null = null;
+  private readonly loupeCamera = new Matrix4();
   /**
    * El modelo cargado es una previsualización de materiales sin confirmar: las exportaciones
    * deben usar la revisión confirmada, así que se bloquean mientras dure.
@@ -135,6 +162,8 @@ export class App {
     this.measure = new MeasureTool(container, () => this.emit('state'));
     this.scene.add(this.measure.group);
     this.scene.add(this.highlight.group);
+    this.scene.add(this.layerHighlight.group);
+    this.loupe = new Loupe(container);
 
     this.bindPointer();
     // Los paneles acoplados cambian el tamaño del visor sin redimensionar la ventana
@@ -214,6 +243,42 @@ export class App {
     }
     this.container.classList.toggle('is-measuring', active);
     this.measure.setActive(active);
+    this.pointerDirty = true;
+    if (!active) {
+      this.snap = null;
+      this.loupe.hide();
+    }
+  }
+
+  // --- Selección de capa ----------------------------------------------------
+
+  /**
+   * Selecciona una capa (o ninguna) y resalta todos sus elementos. Si la capa está oculta, la
+   * selección se conserva pero no se dibuja nada hasta que vuelva a mostrarse.
+   */
+  selectLayer(name: string | null): void {
+    const info = name ? this.layers.layers.get(name) : undefined;
+    this.selectedLayer = info ? info.name : null;
+    this.layerHighlight.clear();
+    if (info) this.layerHighlight.show(info.nodes);
+    this.syncLayerHighlight();
+    this.emit('state');
+  }
+
+  private syncLayerHighlight(): void {
+    const name = this.selectedLayer;
+    this.layerHighlight.group.visible = name !== null && this.state.layers[name]?.visible !== false;
+  }
+
+  /**
+   * Oculta las ayudas de pantalla (regla, resaltados) para un render limpio (PNG, miniaturas,
+   * capturas). Devuelve la función que las restaura.
+   */
+  hideHelpers(): () => void {
+    const groups = [this.measure.group, this.layerHighlight.group, this.highlight.group];
+    const previous = groups.map((group) => group.visible);
+    for (const group of groups) group.visible = false;
+    return () => groups.forEach((group, i) => (group.visible = previous[i]!));
   }
 
   /** Reproduce o pausa la animación del día (y avisa a la interfaz). */
@@ -242,6 +307,8 @@ export class App {
     if (!model) return;
     this.measure.clear(); // los puntos eran del modelo anterior
     this.highlight.clear();
+    this.layerHighlight.clear(); // sus copias comparten geometría con el modelo que se libera
+    this.snap = null;
     this.scene.remove(model.root);
     // El entorno (cielo/HDRI) es de SceneLighting y se reutiliza con el siguiente modelo
     const keep = new Set<Texture>();
@@ -307,6 +374,19 @@ export class App {
       : ![...this.layers.layers.values()].some((l) => l.kind === 'terrain');
     const located = keepView ? false : this.geolocateSun(model);
     this.info.hide();
+    // La capa seleccionada sigue seleccionada si existe en el modelo nuevo; si no, se avisa
+    const selected = this.selectedLayer;
+    if (selected !== null) {
+      const info = keepView ? this.layers.layers.get(selected) : undefined;
+      if (info) {
+        this.layerHighlight.show(info.nodes);
+      } else {
+        this.selectedLayer = null;
+        if (keepView) {
+          this.notify(`La capa «${selected}» ya no existe en el modelo: selección quitada.`);
+        }
+      }
+    }
     this.applyAll();
     this.emit('model');
     if (located) this.emit('state');
@@ -351,6 +431,7 @@ export class App {
 
   applyLayers(): void {
     this.layers.apply(this.state.layers);
+    this.syncLayerHighlight();
   }
 
   applyLights(): void {
@@ -396,6 +477,19 @@ export class App {
   private bindPointer(): void {
     const dom = this.renderer.domElement;
     dom.addEventListener('pointerdown', (e) => this.pointerDown.set(e.clientX, e.clientY));
+    // Solo se anota la posición: no se detiene ni se consume ningún evento del visor
+    dom.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch') return;
+      const rect = dom.getBoundingClientRect();
+      this.pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      this.pointerDirty = true;
+    });
+    dom.addEventListener('pointerleave', () => {
+      this.pointer = null;
+      this.snap = null;
+      this.loupe.hide();
+    });
+    dom.addEventListener('wheel', () => (this.pointerDirty = true), { passive: true });
     dom.addEventListener('pointerup', (e) => {
       if (e.button !== 0 || this.nav.flying || this.lights.dragging) return;
       if (this.pointerDown.distanceTo(new Vector2(e.clientX, e.clientY)) > CLICK_TOLERANCE_PX)
@@ -420,12 +514,49 @@ export class App {
     return firstVisibleHit(this.raycaster.intersectObject(this.model.root, true));
   }
 
+  /**
+   * Punto que se mediría bajo esa posición del visor (ajustado a vértice o borde). Si el cursor
+   * queda unos píxeles fuera de la silueta (apuntando a una esquina es lo habitual), se prueban
+   * rayos vecinos y se acepta solo un vértice o un borde a distancia de ajuste del cursor.
+   */
+  private snapAt(x: number, y: number): SnapResult | null {
+    const model = this.model;
+    if (!model) return null;
+    const { clientWidth: width, clientHeight: height } = this.renderer.domElement;
+    const viewport = { width, height };
+    const cast = (px: number, py: number): SnapResult | null => {
+      const ndc = new Vector2((px / width) * 2 - 1, -(py / height) * 2 + 1);
+      this.raycaster.setFromCamera(ndc, this.nav.camera);
+      const hit = firstVisibleHit(this.raycaster.intersectObject(model.root, true));
+      // El ajuste se mide siempre respecto al cursor real, no al rayo vecino
+      return hit ? snapHit(hit, this.raycaster.ray, this.nav.camera, { x, y }, viewport) : null;
+    };
+    const direct = cast(x, y);
+    if (direct) return direct;
+    let best: { snap: SnapResult; distance: number } | null = null;
+    for (const [dx, dy] of NEAR_MISS_OFFSETS) {
+      const snap = cast(x + dx, y + dy);
+      if (!snap || snap.kind === 'surface') continue;
+      const screen = toScreen(snap.point, this.nav.camera, viewport);
+      const distance = Math.hypot(screen.x - x, screen.y - y);
+      const better =
+        !best ||
+        (snap.kind === 'vertex' && best.snap.kind !== 'vertex') ||
+        (snap.kind === best.snap.kind && distance < best.distance);
+      if (better) best = { snap, distance };
+    }
+    return best?.snap ?? null;
+  }
+
   private onClick(event: MouseEvent): void {
-    const hit = this.hitAt(event);
     if (this.measure.active) {
-      if (hit) this.measure.addPoint(hit.point);
+      // El mismo cálculo que muestra la lupa: lo que se ve es lo que se mide
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      const snap = this.snapAt(event.clientX - rect.left, event.clientY - rect.top);
+      if (snap) this.measure.addPoint(snap.point);
       return;
     }
+    const hit = this.hitAt(event);
     if (this.placing) {
       if (!hit) return;
       const normal = hit.face?.normal.clone().transformDirection(hit.object.matrixWorld);
@@ -470,7 +601,29 @@ export class App {
     const { clientWidth: w, clientHeight: h } = this.container;
     this.measure.update(this.nav.camera, w, h);
     this.renderer.render(this.scene, this.nav.camera);
+    this.drawLoupe(w, h);
     this.stats.update(now);
+  }
+
+  /** Lupa de medida: copia el fotograma recién dibujado alrededor del cursor. */
+  private drawLoupe(width: number, height: number): void {
+    const pointer = this.pointer;
+    if (!this.measure.active || !pointer || this.nav.flying) {
+      this.loupe.hide();
+      return;
+    }
+    // El rayo solo se recalcula si se movió el puntero o la cámara (rueda, órbita, inercia)
+    const camera = this.nav.camera.matrixWorld;
+    if (this.pointerDirty || !camera.equals(this.loupeCamera)) {
+      this.snap = this.snapAt(pointer.x, pointer.y);
+      this.pointerDirty = false;
+      this.loupeCamera.copy(camera);
+    }
+    const viewport = { width, height };
+    const target = this.snap
+      ? { screen: toScreen(this.snap.point, this.nav.camera, viewport), kind: this.snap.kind }
+      : null;
+    this.loupe.draw(this.renderer.domElement, pointer, viewport, target);
   }
 
   get viewportAspect(): number {

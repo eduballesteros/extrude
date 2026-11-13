@@ -77,6 +77,7 @@ describe('App.releaseModel (usado por setModel y unload)', () => {
       } as LoadedModel,
       measure: { clear: vi.fn() }, // los puntos medidos eran del modelo anterior
       highlight: { clear: vi.fn() }, // las cajas de una propuesta eran del modelo anterior
+      layerHighlight: { clear: vi.fn() }, // las copias de la capa resaltada, también
     };
     const geometrySpy = spyDispose(previous.geometry);
     const materialSpy = spyDispose(previous.material);

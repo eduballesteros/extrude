@@ -50,8 +50,9 @@
       <h1>De plano DWG/DXF a modelo 3D, paso a paso</h1>
       <p class="g-lead">
         Convierte planos urbanos en modelos 3D, estudia el sol, guarda vistas, asigna materiales,
-        edita el proyecto con lenguaje natural y exporta a Blender. Si es tu primera vez, sigue los
-        apartados 1 a 4; el resto sirve de consulta.
+        edita el proyecto con lenguaje natural y exporta a Blender. Todo desde el navegador: no
+        tienes que instalar nada. Si es tu primera vez, sigue los apartados 1 a 4; el resto sirve de
+        consulta.
       </p>
       <nav class="g-start" aria-label="Elige por dónde empezar">
         <a class="g-start-card" href="#primer-recorrido">
@@ -59,10 +60,10 @@
           <strong>Abre un ejemplo</strong>
           <span>Conoce el visor, el sol y las vistas sin preparar un plano.</span>
         </a>
-        <a class="g-start-card" href="#preparar">
+        <a class="g-start-card" href="#convertir">
           <span class="g-card-label">Tengo un DWG o DXF</span>
-          <strong>Prepara tu proyecto</strong>
-          <span>Revisa unidades, alturas y configuración antes de convertir.</span>
+          <strong>Súbelo y conviértelo</strong>
+          <span>Suelta el plano en el visor y revisa alturas y avisos del resultado.</span>
         </a>
         <a class="g-start-card" href="#ia">
           <span class="g-card-label">Ya tengo un modelo</span>
@@ -72,8 +73,8 @@
       </nav>
       <ol class="g-flow" aria-label="Flujo de trabajo">
         <li><strong>Plano</strong><span>DWG / DXF</span></li>
-        <li><strong>Configuración</strong><span>YAML por proyecto</span></li>
         <li><strong>Conversión</strong><span>GLB + informe</span></li>
+        <li><strong>Configuración</strong><span>ajustar y repetir</span></li>
         <li><strong>Visor</strong><span>sol, capas, vistas</span></li>
         <li><strong>Materiales e IA</strong><span>revisiones</span></li>
         <li><strong>Exportar</strong><span>PNG, GLB, Blender</span></li>
@@ -97,16 +98,15 @@
         </div>
         <p class="g-toc-title">Contenido</p>
         <ol>
-          <li><a href="#instalar">Instalar y arrancar</a></li>
+          <li><a href="#empezar">Entrar en Extrude</a></li>
           <li><a href="#primer-recorrido">Primer recorrido</a></li>
-          <li><a href="#preparar">Preparar tu plano</a></li>
-          <li><a href="#convertir">Convertir</a></li>
+          <li><a href="#convertir">Convertir tu plano</a></li>
+          <li><a href="#preparar">Ajustar la configuración</a></li>
           <li><a href="#visor">El visor</a></li>
           <li><a href="#vistas">Vistas y exportación</a></li>
           <li><a href="#materiales">Materiales</a></li>
           <li><a href="#ia">Editar con IA</a></li>
-          <li><a href="#revisiones">Revisiones y archivos</a></li>
-          <li><a href="#comandos">Comandos</a></li>
+          <li><a href="#revisiones">Revisiones y descargas</a></li>
           <li><a href="#problemas">Solución de problemas</a></li>
           <li><a href="#limitaciones">Compatibilidad y límites</a></li>
           <li><a href="#glosario">Glosario</a></li>
@@ -115,114 +115,77 @@
 
       <main class="g-content" id="contenido" tabindex="-1">
         <!-- 1 ------------------------------------------------------------------------------ -->
-        <section id="instalar">
-          <h2><span class="g-num">1</span>Instalar y arrancar</h2>
-          <h3>Requisitos</h3>
+        <section id="empezar">
+          <h2><span class="g-num">1</span>Entrar en Extrude</h2>
+          <p>
+            Extrude funciona en el navegador. Abre la dirección que te haya dado quien administra el
+            servidor: la conversión de planos, los materiales y la IA se ejecutan allí, no en tu
+            equipo.
+          </p>
           <div class="g-table">
             <table>
               <thead>
                 <tr>
-                  <th>Herramienta</th>
-                  <th>Versión</th>
+                  <th>Necesitas</th>
                   <th>Para qué</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>Python</td>
-                  <td>3.12 o superior</td>
-                  <td>Conversor (<code>pipeline/</code>)</td>
+                  <td>Un navegador actual de escritorio (Chrome, Edge, Firefox o Safari)</td>
+                  <td>Ver y editar el modelo 3D</td>
                 </tr>
                 <tr>
-                  <td>uv</td>
-                  <td>0.4 o superior</td>
-                  <td>Entorno y dependencias de Python</td>
+                  <td>Usuario y contraseña</td>
+                  <td>Solo si el servidor tiene cuentas; te los da la administración</td>
                 </tr>
                 <tr>
-                  <td>Node.js</td>
-                  <td>22.12 o superior</td>
-                  <td>Visor y herramientas glTF</td>
+                  <td>Tu plano en <code>.dxf</code> o <code>.dwg</code></td>
+                  <td>
+                    Convertirlo en 3D. Si el DWG no se acepta, guárdalo desde el CAD como DXF 2018
+                  </td>
                 </tr>
                 <tr>
-                  <td>just</td>
-                  <td>1.38 o superior</td>
-                  <td>Atajos de comandos (opcional)</td>
-                </tr>
-                <tr>
-                  <td>ODA File Converter o LibreDWG</td>
-                  <td>—</td>
-                  <td>Solo para abrir <code>.dwg</code>; sin ellos, usa <code>.dxf</code></td>
-                </tr>
-                <tr>
-                  <td>Blender</td>
-                  <td>4.2 o superior</td>
+                  <td>Blender 4.2 o superior</td>
                   <td>Opcional: render con cámaras y luces</td>
                 </tr>
               </tbody>
             </table>
           </div>
+          <h3>Iniciar sesión</h3>
+          <p>
+            Si el servidor tiene cuentas, al abrirlo aparece <strong>Servidor compartido</strong>:
+            escribe tu usuario y contraseña y pulsa <strong>Entrar</strong>. La sesión dura hasta
+            que cierras la pestaña (como mucho unas horas); después vuelve a pedirla.
+          </p>
+          <ul class="g-list">
+            <li>Cada proyecto es de quien lo sube. Los demás no lo ven.</li>
+            <li>
+              Para que otra persona vea o edite tu proyecto, pide a la administración que se lo
+              comparta como <em>lector</em> o <em>editor</em>.
+            </li>
+            <li>
+              Si dos personas confirman cambios a la vez, la segunda confirmación se rechaza sin
+              perder nada: recarga el modelo y repítela.
+            </li>
+          </ul>
           <div class="g-callout">
-            <strong>DWG necesita un conversor.</strong> El recomendado es ODA File Converter
-            (gratuito con registro); también sirve LibreDWG (<code>dwg2dxf</code>). Si están en otra
-            ruta, indícala con <code>EXTRUDE_ODA_PATH</code> o <code>EXTRUDE_DWG2DXF_PATH</code>.
-            <code>just doctor</code> te dice cuál detecta. Alternativa: en el CAD,
-            <em>Guardar como</em> → DXF 2018.
+            <strong>La IA la activa la administración.</strong> Las claves de Claude u OpenAI se
+            guardan en el servidor y nunca llegan a tu navegador. Si en
+            <a href="#ia">Editar con IA</a> el proveedor aparece «no disponible», pídele que lo
+            active.
           </div>
-
-          <h3>Instalación</h3>
-          <pre><code>just setup</code></pre>
-          <p>Sin <code>just</code>:</p>
-          <pre><code>uv sync --project pipeline
-npm ci --prefix viewer
-npm ci --prefix tools</code></pre>
-
-          <h3>Arranque</h3>
-          <div class="g-grid-2">
-            <div class="g-card">
-              <p class="g-card-label">Terminal 1</p>
-              <pre><code>just serve</code></pre>
-              <p>Servidor de conversión, materiales e IA en <code>127.0.0.1:8765</code>.</p>
-            </div>
-            <div class="g-card">
-              <p class="g-card-label">Terminal 2</p>
-              <pre><code>just dev</code></pre>
-              <p>Visor en <code>localhost:5173</code>. Ábrelo en el navegador.</p>
-            </div>
-          </div>
-          <p>
-            Para abrir GLB o los ejemplos basta con <code>just dev</code>. Para convertir planos,
-            usar materiales o editar con IA necesitas también <code>just serve</code>.
-          </p>
-
-          <h3>Activar la edición con IA (opcional)</h3>
-          <p>La IA la usa solo el servidor; las claves nunca llegan al navegador.</p>
-          <pre><code>cd pipeline
-uv sync --extra ai                 # SDK de Anthropic y OpenAI
-export ANTHROPIC_API_KEY=…         # Claude
-export OPENAI_API_KEY=…            # OpenAI
-export EXTRUDE_OPENAI_MODEL=…      # modelo de OpenAI contratado
-uv run extrude serve</code></pre>
-          <p>
-            Para probar sin coste ni red: <code>uv run extrude serve --ai-simulated</code> añade el
-            proveedor <strong>Simulado</strong>, un intérprete de reglas local (no es IA). En
-            PowerShell, las variables se escriben <code>$env:ANTHROPIC_API_KEY="…"</code>.
-          </p>
         </section>
 
         <!-- 2 ------------------------------------------------------------------------------ -->
         <section id="primer-recorrido">
           <h2><span class="g-num">2</span>Primer recorrido con los ejemplos</h2>
           <div class="g-callout">
-            <strong>Empieza sin configurar tu proyecto.</strong> Con el visor arrancado, abre
-            <strong>Manzana 2D</strong> en la pantalla de inicio. Para consultar este ejemplo no
-            necesitas activar una API de IA. Si todavía no has arrancado el visor,
-            <a href="#instalar">sigue los pasos de instalación</a>.
+            <strong>Empieza sin tu propio plano.</strong> En la pantalla de inicio hay tres ejemplos
+            de un clic. No necesitas IA ni configurar nada.
           </div>
           <ol class="g-steps">
-            <li>
-              Con <code>just dev</code> en marcha, abre el visor: verás la pantalla de inicio con
-              tres ejemplos de un clic.
-            </li>
+            <li>Abre Extrude: verás la pantalla de inicio con los ejemplos.</li>
             <li>
               Pulsa <strong>Manzana 2D</strong>. Al terminar la carga aparece el espacio de trabajo.
             </li>
@@ -244,34 +207,103 @@ uv run extrude serve</code></pre>
         </section>
 
         <!-- 3 ------------------------------------------------------------------------------ -->
-        <section id="preparar">
-          <h2><span class="g-num">3</span>Preparar tu plano</h2>
+        <section id="convertir">
+          <h2><span class="g-num">3</span>Convertir tu plano</h2>
+          <ol class="g-steps">
+            <li>
+              En la pantalla de inicio, suelta el <code>.dwg</code> o <code>.dxf</code> en la zona
+              <strong>Suelta aquí tu plano o tu modelo 3D</strong>, o pulsa
+              <strong>Elegir archivo</strong>.
+            </li>
+            <li>
+              Si ya tienes una configuración (<code>.yaml</code>, ver
+              <a href="#preparar">apartado 4</a>), suéltala <strong>antes</strong> que el plano. Si
+              no, Extrude genera una automática a partir de las capas del dibujo.
+            </li>
+            <li>
+              El visor muestra la fase real: leyendo entidades, construyendo geometría, exportando…
+              Puedes seguir en la pestaña; un plano grande tarda unos minutos.
+            </li>
+            <li>
+              Se abre el modelo con un <strong>resumen de calidad</strong>. Las descargas están en
+              <strong>Exportar → Conversión</strong>.
+            </li>
+          </ol>
+          <div class="g-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Botón</th>
+                  <th>Qué hace</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Cancelar espera</td>
+                  <td>Deja de esperar; la conversión sigue en el servidor</td>
+                </tr>
+                <tr>
+                  <td>Retomar espera</td>
+                  <td>Vuelve a consultar el mismo trabajo sin reenviar el plano</td>
+                </tr>
+                <tr>
+                  <td>Reabrir resultado</td>
+                  <td>Reutiliza los archivos si terminó pero falló la descarga</td>
+                </tr>
+                <tr>
+                  <td>Reintentar envío</td>
+                  <td>Vuelve a subir el plano si el trabajo falló o caducó</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Revisar la calidad</h3>
           <p>
-            Cada estudio dibuja distinto. Extrude no presupone nada: capas, alturas y unidades se
-            declaran en un <strong>YAML del proyecto</strong>.
-          </p>
-          <h3>1. Inspeccionar</h3>
-          <pre><code>cd pipeline
-uv run extrude inspect ../planos/manzana.dxf</code></pre>
-          <p>
-            Muestra unidades, extensión, entidades por tipo y capa, ejemplos de textos (para
-            detectar rótulos como <code>4P</code> o <code>B+3</code>), atributos de bloque y avisos.
-            Si las unidades del dibujo faltan o son incorrectas, fuérzalas con
-            <code>--units mm</code>.
-          </p>
-          <h3>2. Generar un borrador</h3>
-          <pre><code>uv run extrude init-config ../planos/manzana.dxf -o ../proyecto.yaml</code></pre>
-          <p>
-            Adivina el tipo de cada capa por su nombre (<code>EDIF*</code> → edificio,
-            <code>VIAL*</code> → vial, <code>AGUA</code>, <code>VERDE</code>, <code>CURVA</code> →
-            terreno) y de dónde sale la altura (atributos, textos dentro de la planta, tipo de
-            bloque o cota Z). Cada regla lleva comentarios con la evidencia.
+            El resumen señala alturas por defecto o ambiguas, edificios descartados por no tener
+            altura y problemas de apoyo (flotantes, enterrados, fuera del terreno). El
+            <strong>Informe de conversión</strong> (en Exportar → Conversión) detalla, capa por
+            capa, todo lo leído, convertido, reparado o descartado, con los identificadores y
+            coordenadas del dibujo para localizar cada caso en el CAD.
           </p>
           <div class="g-callout g-callout-warn">
-            <strong>Revísalo siempre:</strong> es un punto de partida, no una configuración
-            verificada.
+            <strong>Con configuración automática, revisa siempre el resultado.</strong> Es un punto
+            de partida: adivina el tipo de cada capa por su nombre y de dónde sale la altura. Si
+            algo no cuadra, ajústala como se explica en el <a href="#preparar">apartado 4</a>.
           </div>
-          <h3>3. Ajustar el YAML</h3>
+          <h3>Planos muy grandes</h3>
+          <p>
+            Añade <code>?tiles=500</code> al final de la dirección del visor (por ejemplo
+            <code>…/?tiles=500</code>) antes de subir el plano: el modelo se divide en teselas de
+            500 m y se carga por partes. Los materiales, la IA y deshacer siguen funcionando; cada
+            cambio confirmado regenera las teselas. En <strong>Exportar → Conversión</strong> puedes
+            descargar además el modelo comprimido (<em>Meshopt</em> o <em>Draco</em>), más ligero
+            para publicarlo.
+          </p>
+        </section>
+
+        <!-- 4 ------------------------------------------------------------------------------ -->
+        <section id="preparar">
+          <h2><span class="g-num">4</span>Ajustar la configuración</h2>
+          <p>
+            Cada estudio dibuja distinto. Extrude no presupone nada: qué capa es un edificio, de
+            dónde sale su altura y en qué unidades está el dibujo se declara en un archivo de
+            configuración (<strong>YAML</strong>) por proyecto.
+          </p>
+          <ol class="g-steps">
+            <li>
+              Convierte el plano una vez sin configuración y descarga
+              <strong>Exportar → Conversión → Configuración generada</strong>.
+            </li>
+            <li>
+              Ábrela con cualquier editor de texto (Bloc de notas, TextEdit, VS Code). Cada regla
+              lleva comentarios con lo que se ha encontrado en el dibujo.
+            </li>
+            <li>Corrige lo necesario y guarda el archivo con extensión <code>.yaml</code>.</li>
+            <li>
+              Vuelve a la pantalla de inicio (<strong>Cerrar modelo</strong>), suelta el
+              <code>.yaml</code> y después el plano. Repite hasta que el resultado sea el esperado.
+            </li>
+          </ol>
           <pre><code>units: auto            # auto | mm | cm | m | km | in | ft
 recenter: true         # imprescindible con coordenadas UTM
 crs: "EPSG:25830"      # opcional: sitúa el sol en la ubicación real
@@ -327,6 +359,11 @@ layers:                # gana la PRIMERA regla que encaje
           </p>
           <ul class="g-list">
             <li>
+              <strong>Unidades</strong>: si el modelo sale diminuto o gigante, cambia
+              <code>units: auto</code> por la unidad real del dibujo (<code>mm</code>,
+              <code>cm</code>, <code>m</code>…).
+            </li>
+            <li>
               <strong>Catastro</strong> (<code>IV</code>, <code>II</code>):
               <code>text_regex: '^\s*([IVXL]+)\b'</code>
             </li>
@@ -347,117 +384,91 @@ layers:                # gana la PRIMERA regla que encaje
               <code>instancing_min</code> copias (10 por defecto)
             </li>
           </ul>
-          <p class="g-more">Todas las claves: <code>docs/CONFIG.md</code>.</p>
-        </section>
+          <h3>Revisar el apoyo y las capas sin convertir</h3>
+          <p>
+            Extrude apoya solo cada edificio sobre el terreno que tiene debajo: no hay que tocar la
+            configuración para ello. Si el plano trae curvas o puntos con cota, cada objeto se
+            coloca sobre su propio terreno, con la planta horizontal y un zócalo cuando hay
+            pendiente. Lo que el plano no dice no se inventa: se marca para que lo revises.
+          </p>
+          <p>
+            En la pestaña <strong>Capas</strong>, la sección
+            <strong>Revisión del proyecto</strong> resume lo que queda pendiente:
+          </p>
+          <ul class="g-list">
+            <li>
+              <strong>Apoyo en el terreno:</strong> objetos que flotan, que solo tocan en parte o
+              que quedan enterrados. En proyectos convertidos con versiones anteriores, marca la
+              capa (viene marcada si Extrude lo propone) y pulsa
+              <strong>Aplicar y reconvertir</strong>.
+            </li>
+            <li>
+              <strong>Capas sin convertir con geometría:</strong> capas cuyo nombre no se reconoce
+              pero que contienen contornos cerrados. No están en el modelo. Elige qué son
+              (edificios, viales, agua…) o <em>No convertir</em>.
+            </li>
+            <li>
+              <strong>Alturas provisionales:</strong> edificios a los que el plano no da altura y
+              salen con 9 m. Fíjala por capa, como se explica debajo.
+            </li>
+            <li>
+              <strong>Zócalos de más de 3 m:</strong> el contacto con el terreno está resuelto, pero
+              conviene revisar la implantación.
+            </li>
+          </ul>
+          <p>
+            Tras reconvertir puedes <strong>Recuperar el resultado anterior</strong> (modelo,
+            configuración, materiales y ediciones). El resumen de calidad distingue lo convertido de
+            lo que no: «0 flotantes» se refiere solo a los objetos que están en el modelo.
+          </p>
+          <div class="g-callout">
+            <strong>Proyectos ya convertidos.</strong> La pantalla de inicio lista los
+            <strong>Proyectos en el servidor</strong>: se reabren sin volver a subir el plano y los
+            que tienen objetos mal apoyados aparecen señalados.
+          </div>
 
-        <!-- 4 ------------------------------------------------------------------------------ -->
-        <section id="convertir">
-          <h2><span class="g-num">4</span>Convertir</h2>
-          <h3>Desde el visor (lo más cómodo)</h3>
+          <h3>Cambiar la altura de una capa sin salir del visor</h3>
+          <p>
+            Con un plano convertido abierto, la pestaña <strong>Capas</strong> muestra en cada capa
+            su <strong>altura efectiva</strong> (la usada en la conversión; un rango como «6–18 m»
+            si sus edificios tienen alturas distintas) y un campo para fijar otra.
+          </p>
           <ol class="g-steps">
             <li>
-              Con <code>just serve</code> en marcha, suelta primero el <code>.yaml</code> del
-              proyecto (o elígelo con <strong>Config YAML…</strong>). Si no, se genera un borrador
-              automático.
+              Escribe la altura en metros. Queda como
+              <span class="g-chip g-chip-warn">pendiente</span>; si no es válida, el motivo aparece
+              junto al campo. La flecha circular recupera el valor anterior.
             </li>
             <li>
-              Suelta el <code>.dwg</code> o <code>.dxf</code>, o usa
-              <strong>Examinar equipo</strong>.
+              Pulsa <strong>Aplicar alturas</strong>. Extrude actualiza la configuración del
+              proyecto y vuelve a convertir el plano, con su barra de progreso. El modelo en
+              pantalla solo cambia cuando la conversión termina bien; si falla, sigue el anterior.
             </li>
             <li>
-              El visor muestra la fase real: leyendo entidades, construyendo geometría, exportando…
+              La altura pasa a <span class="g-chip">guardada</span>. Se conservan la cámara, el sol
+              y las capas visibles. <strong>Descargar YAML</strong> te da la configuración usada.
             </li>
-            <li>Se abre el modelo, con enlaces al GLB, al informe y a la configuración usada.</li>
           </ol>
-          <div class="g-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Botón</th>
-                  <th>Qué hace</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Cancelar espera</td>
-                  <td>Deja de esperar; la conversión sigue en el servidor</td>
-                </tr>
-                <tr>
-                  <td>Retomar espera</td>
-                  <td>Vuelve a consultar el mismo trabajo sin reenviar el plano</td>
-                </tr>
-                <tr>
-                  <td>Reabrir resultado</td>
-                  <td>Reutiliza los archivos si terminó pero falló la descarga</td>
-                </tr>
-                <tr>
-                  <td>Reintentar envío</td>
-                  <td>Vuelve a subir el plano si el trabajo falló o caducó</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <h3>Desde la línea de comandos</h3>
-          <pre><code>cd pipeline
-uv run extrude convert ../planos/manzana.dwg -c ../proyecto.yaml -o ../out/manzana</code></pre>
-          <div class="g-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Archivo</th>
-                  <th>Contenido</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>model.glb</code></td>
-                  <td>El modelo 3D</td>
-                </tr>
-                <tr>
-                  <td><code>report.md</code> / <code>report.json</code></td>
-                  <td>Todo lo leído, convertido, reparado o descartado, por capa</td>
-                </tr>
-                <tr>
-                  <td><code>objects.json</code></td>
-                  <td>Catálogo: ID persistente, etiqueta (E-001…), superficies y revisión</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <h3>Revisar la calidad</h3>
-          <p>
-            Al abrir un resultado aparece un <strong>resumen de calidad</strong>: alturas por
-            defecto o ambiguas, descartes por falta de altura y comprobaciones de apoyo (flotantes,
-            enterrados, fuera del terreno). El informe identifica cada caso con los handles del DXF
-            y sus coordenadas, para localizarlo en el CAD.
-          </p>
-          <h3>Planos muy grandes</h3>
           <ul class="g-list">
             <li>
-              <strong>Teselas</strong>: abre el visor con <code>?tiles=500</code> o usa
-              <code>--tiles 500</code> en la CLI.
+              Fijar una altura hace que <strong>todos</strong> los elementos de la capa tengan esa
+              altura. La «×» junto a una altura guardada la quita: la capa vuelve a su regla
+              original (rótulos, atributos…).
             </li>
             <li>
-              <strong>Compresión</strong>: <code>--compress meshopt</code> (o <code>draco</code>).
+              Reconvertir parte del plano original: los materiales y ediciones ya confirmados se
+              pierden (el visor lo avisa y pide confirmarlo). Descarga antes el GLB materializado si
+              lo necesitas.
+            </li>
+            <li>
+              Si abriste un GLB o un ejemplo, no hay plano que reconvertir: el panel lo explica y
+              solo muestra las alturas.
             </li>
           </ul>
-          <p>
-            Con teselas o compresión, la conversión guarda además un
-            <strong>maestro editable</strong> (<code>model.master.glb</code>, sin comprimir y de una
-            pieza). Los materiales, la edición con IA y deshacer o rehacer trabajan sobre él.
-          </p>
-          <ul class="g-list">
-            <li>
-              <strong>Teselado:</strong> cada revisión confirmada, y cada deshacer o rehacer,
-              regenera <code>tiles/*.glb</code> y <code>manifest.json</code> con la misma regla de
-              reparto que la conversión. Si un objeto se mueve a otra tesela, cambia de archivo.
-            </li>
-            <li>
-              <strong>Comprimido</strong> (Draco o Meshopt): se decodifica a un maestro que conserva
-              los IDs, las etiquetas y las instancias. El original no se modifica. En
-              <em>Exportar</em> tienes <em>GLB actual comprimido (Meshopt)</em> y <em>(Draco)</em>.
-            </li>
-          </ul>
+          <div class="g-callout">
+            <strong>Copia el texto tal cual.</strong> En YAML importan los espacios al principio de
+            cada línea: usa espacios, no tabuladores, y respeta la sangría del ejemplo.
+          </div>
         </section>
 
         <!-- 5 ------------------------------------------------------------------------------ -->
@@ -514,21 +525,28 @@ uv run extrude convert ../planos/manzana.dwg -c ../proyecto.yaml -o ../out/manza
           <p>
             Buscador, visibilidad, color, <strong>aislar</strong> y triángulos por capa. Los colores
             de capa son de visualización: al aplicar materiales se retiran para no teñir las
-            texturas.
+            texturas. <strong>Pulsa el nombre de una capa</strong> para resaltar en naranja todos
+            sus elementos en el modelo; púlsalo otra vez (o <strong>Quitar selección</strong>) para
+            volver a la apariencia normal. Si ocultas la capa seleccionada, el resaltado desaparece
+            hasta que la muestres.
           </p>
           <h3>Inspeccionar y medir</h3>
           <p>
             Pulsa un objeto para ver etiqueta, ID, superficie pulsada (fachada, patio, cubierta,
             zócalo…), altura, plantas, cota y capa. Con <kbd>M</kbd> mides: dos clics dan distancia
-            3D, en planta, desnivel y pendiente. <kbd>Esc</kbd> borra la medición.
+            3D, en planta, desnivel y pendiente. <kbd>Esc</kbd> borra la medición. Mientras colocas
+            un punto, una <strong>lupa</strong> junto al cursor amplía la zona y marca el punto
+            exacto que se usará: se ajusta al <em>vértice</em> o al <em>borde</em> más cercano
+            (también si el cursor queda unos píxeles fuera de la esquina) o, si no hay ninguno
+            cerca, a la <em>superficie</em>.
           </p>
           <h3>Sol, sombras y ambiente</h3>
           <ul class="g-list">
             <li>
               <strong>Luz solar</strong>: línea de 0 a 24 h con amanecer y ocaso, ▶ para reproducir
               el día (0,5×–4×), fecha, zona horaria, coordenadas, modo manual y
-              <strong>Norte real</strong>. Con un <code>crs</code> UTM en el YAML, el sol se sitúa
-              en la ubicación del plano.
+              <strong>Norte real</strong>. Con un <code>crs</code> UTM en la configuración, el sol
+              se sitúa en la ubicación del plano.
             </li>
             <li>
               <strong>Sombras</strong>: sin sombras, definidas o suaves; suavizado y cobertura
@@ -609,11 +627,87 @@ uv run extrude convert ../planos/manzana.dwg -c ../proyecto.yaml -o ../out/manza
               </tbody>
             </table>
           </div>
+          <h3>Llevarlo a Blender</h3>
+          <ol class="g-steps">
+            <li>
+              Descarga el GLB (si confirmaste materiales, el <strong>GLB materializado</strong> de
+              la pestaña Materiales) y <strong>Exportar → Script Blender</strong>. Guarda los dos
+              archivos en la misma carpeta.
+            </li>
+            <li>
+              En Blender, abre la pestaña <em>Scripting</em>, pulsa <em>Abrir</em>, elige
+              <code>blender_setup.py</code> y pulsa <em>Ejecutar script</em> (▶).
+            </li>
+            <li>
+              Se crean las cámaras, el sol, las luces y las capas de cada vista. Para renderizarlas
+              todas, escribe <code>render_all()</code> en la consola de Python de Blender.
+            </li>
+          </ol>
+          <h3>Capturas HD y 4K de una vista</h3>
           <p>
-            Para Blender, copia <code>blender_setup.py</code> junto al GLB (si confirmaste
-            materiales, el <code>.materialized.glb</code> que descargas en Materiales) y ejecútalo
-            en <em>Scripting</em> o con <code>blender -b -P blender_setup.py</code>.
+            Cada vista guardada tiene, en el panel <strong>Vistas</strong>, los botones
+            <strong>HD</strong> y <strong>4K</strong> con las dimensiones finales (1920×1080 y
+            3840×2160 en una vista 16:9; una 4:3 da 1440×1080 y 2880×2160). La captura se renderiza
+            a ese tamaño real, con el encuadre de la vista y sin depender del tamaño de la ventana,
+            se guarda en la biblioteca y se descarga. Volver a capturar una vista no sustituye la
+            captura anterior: quedan las dos, con su fecha.
           </p>
+          <h3>Biblioteca de vistas e imágenes</h3>
+          <p>
+            <strong>Biblioteca</strong>, en la barra superior, reúne todas las imágenes del proyecto
+            agrupadas por su vista de origen: las capturas del visor y las generadas por IA. De cada
+            una ves miniatura, tipo, fecha, dimensiones reales, vista de origen y, si procede,
+            prompt y proveedor. Puedes abrirla a tamaño completo, compararla con la captura original
+            (cortinilla deslizante), descargarla o eliminarla sin borrar su vista. Las mismas
+            imágenes aparecen bajo cada vista en el panel Vistas.
+          </p>
+          <ul class="g-list">
+            <li>
+              Las imágenes se guardan <strong>en este navegador</strong>, por proyecto, y siguen ahí
+              al recargar o al <strong>Reabrir el último proyecto</strong> desde la pantalla de
+              inicio. En otro equipo o navegador no estarán: descarga las que quieras conservar.
+            </li>
+            <li>
+              Borrar una vista no borra sus imágenes (quedan como «vista eliminada»). Si el
+              navegador vacía su almacenamiento, la ficha se muestra como «archivo no disponible» y
+              solo puede quitarse.
+            </li>
+          </ul>
+          <h3>Generar imágenes con IA a partir de una vista</h3>
+          <ol class="g-steps">
+            <li>
+              Pulsa <strong>IA</strong> en una vista (o <strong>Generar con IA</strong> en la
+              Biblioteca) y elige hasta cuatro vistas de origen. Se usa su captura más reciente; si
+              no hay, se captura en HD.
+            </li>
+            <li>
+              Escribe el <strong>prompt</strong> con libertad: es la instrucción principal. Las
+              sugerencias y la frase de «conservar encuadre y volumetría» son opcionales.
+              <strong>Mejorar con Claude</strong> propone una redacción a partir de las vistas, en
+              un campo que puedes editar y aceptar o descartar; Claude no genera la imagen.
+            </li>
+            <li>
+              Elige proveedor, modelo y resolución (estándar, HD o 4K). El visor indica qué se
+              pedirá exactamente y si ese modelo puede darlo de forma nativa.
+            </li>
+            <li>
+              <strong>Revisar envío</strong> muestra las capturas, el proveedor y el prompt exacto.
+              <strong>Enviar y generar</strong> lanza una sola generación; puedes cancelarla o
+              cerrar la ventana mientras termina.
+            </li>
+            <li>
+              El resultado se guarda junto a su captura original con sus
+              <strong>dimensiones reales</strong>. Si es menor que 4K puedes
+              <strong>ampliarlo</strong>: la ampliación se guarda aparte y queda etiquetada como
+              «Ampliada», nunca como 4K nativo.
+            </li>
+          </ol>
+          <div class="g-callout g-callout-warn">
+            <strong>La IA no garantiza la geometría.</strong> El proveedor crea una imagen nueva a
+            partir de la referencia: puede cambiar volúmenes, huecos o el encuadre. Compárala
+            siempre con la captura original. No modifica el plano ni el modelo. Los proveedores
+            disponibles los activa la administración; cada generación puede tener coste.
+          </div>
           <div class="g-callout g-callout-warn">
             Mientras haya una <strong>previsualización sin confirmar</strong> (materiales o cambios
             con IA), exportar está bloqueado: confirma o descarta antes.
@@ -624,8 +718,8 @@ uv run extrude convert ../planos/manzana.dwg -c ../proyecto.yaml -o ../out/manza
         <section id="materiales">
           <h2><span class="g-num">7</span>Materiales</h2>
           <p>
-            Pestaña <strong>Materiales</strong> (necesita <code>just serve</code>): materiales
-            reales con textura por edificio y superficie, sin cambiar la geometría.
+            Pestaña <strong>Materiales</strong>: materiales reales con textura por edificio y
+            superficie, sin cambiar la geometría.
           </p>
           <div class="g-grid-2">
             <div class="g-card">
@@ -695,8 +789,8 @@ uv run extrude convert ../planos/manzana.dwg -c ../proyecto.yaml -o ../out/manza
             </li>
           </ul>
           <p>
-            Funciona con modelos convertidos desde el visor y con GLB base abiertos desde disco. Un
-            GLB ya materializado no se edita: abre su <code>model.glb</code>.
+            Funciona con modelos convertidos desde el visor y con GLB base abiertos desde tu equipo.
+            Un GLB ya materializado no se edita: abre el GLB convertido original.
           </p>
         </section>
 
@@ -835,8 +929,9 @@ uv run extrude convert ../planos/manzana.dwg -c ../proyecto.yaml -o ../out/manza
           <h3>Paso a paso</h3>
           <ol class="g-steps">
             <li>
-              Elige <strong>Proveedor</strong> (Claude, OpenAI o Simulado) y
-              <strong>Alcance</strong>: todo, solo los marcados o una capa.
+              Elige <strong>Proveedor</strong> (Claude u OpenAI; <em>Simulado</em> es un intérprete
+              de reglas para probar, no IA) y <strong>Alcance</strong>: todo, solo los marcados o
+              una capa. Solo aparecen como disponibles los que la administración ha activado.
             </li>
             <li>
               Escribe en <strong>Qué quieres cambiar</strong> y pulsa
@@ -913,25 +1008,6 @@ uv run extrude convert ../planos/manzana.dwg -c ../proyecto.yaml -o ../out/manza
             «el más alto», «el central» se ordenan por altura, área o cercanía al centro. Siempre
             con tu confirmación.
           </p>
-          <details class="g-platform">
-            <summary>Configurar las claves en Windows (PowerShell)</summary>
-            <p>
-              Desde la carpeta del repositorio, usa el bloque de tu proveedor. Sustituye los valores
-              de ejemplo y ejecuta el servidor en esa misma terminal.
-            </p>
-            <p><strong>Claude:</strong></p>
-            <pre><code>cd pipeline
-uv sync --extra ai
-$env:ANTHROPIC_API_KEY="TU_CLAVE"
-uv run extrude serve</code></pre>
-            <p><strong>OpenAI:</strong></p>
-            <pre><code>cd pipeline
-uv sync --extra ai
-$env:OPENAI_API_KEY="TU_CLAVE"
-$env:EXTRUDE_OPENAI_MODEL="TU_MODELO"
-uv run extrude serve</code></pre>
-          </details>
-
           <h3>Ejemplos</h3>
           <pre><code>Sube E-001 dos plantas y pon grava en todas las cubiertas salvo E-004
 Los edificios del norte de ladrillo claro
@@ -968,9 +1044,10 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
                   tipo, tamaño, altura, superficies, materiales y posición relativa.
                 </li>
                 <li>
-                  <strong>No se envía</strong>: DWG, GLB, imágenes, coordenadas absolutas, rutas ni
-                  claves.
+                  <strong>No se envía</strong>: DWG, GLB, imágenes, coordenadas absolutas ni nombres
+                  de archivo.
                 </li>
+                <li>La consulta la hace el servidor de Extrude, no tu navegador.</li>
                 <li>El texto va tal cual: no incluyas datos personales.</li>
               </ul>
             </div>
@@ -979,7 +1056,7 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
 
         <!-- 9 ------------------------------------------------------------------------------ -->
         <section id="revisiones">
-          <h2><span class="g-num">9</span>Revisiones, deshacer y archivos</h2>
+          <h2><span class="g-num">9</span>Revisiones, deshacer y descargas</h2>
           <p>
             Cada confirmación (materiales, cambios con IA o solo vistas) crea una revisión:
             <code>rev-000</code> es el modelo convertido, luego <code>rev-001</code>,
@@ -992,170 +1069,89 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
             <table>
               <thead>
                 <tr>
-                  <th>Archivo del trabajo (<code>out/</code>)</th>
-                  <th>Contenido</th>
+                  <th>Para llevarte</th>
+                  <th>Dónde</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td><code>model.glb</code></td>
-                  <td>Modelo convertido (no cambia)</td>
+                  <td>Modelo convertido, informe y configuración</td>
+                  <td><strong>Exportar → Conversión</strong></td>
                 </tr>
                 <tr>
-                  <td><code>model.current.glb</code></td>
-                  <td>Geometría vigente, con las ediciones</td>
+                  <td>Modelo con materiales y ediciones (texturas incluidas)</td>
+                  <td>Materiales → <strong>GLB materializado</strong>, tras confirmar</td>
                 </tr>
                 <tr>
-                  <td><code>model.materialized.glb</code></td>
-                  <td>Geometría vigente con materiales</td>
+                  <td>Plan de materiales (<code>materials.json</code>)</td>
+                  <td>Materiales → <strong>Exportar plan</strong></td>
                 </tr>
                 <tr>
-                  <td><code>materials.json</code></td>
-                  <td>Plan de materiales vigente</td>
-                </tr>
-                <tr>
-                  <td><code>project.json</code></td>
-                  <td>Historial de revisiones</td>
+                  <td>Vistas (<code>views.json</code>), PNG, GLB con cámaras, script de Blender</td>
+                  <td><strong>Exportar</strong></td>
                 </tr>
               </tbody>
             </table>
           </div>
           <p>
-            En modo local, el servidor conserva los 10 últimos trabajos temporales. En modo
-            compartido, los proyectos con propietario no se borran con esa limpieza; al alcanzar tu
-            cuota se rechazan nuevas cargas. Para guardar una copia, descarga el GLB materializado y
-            <code>materials.json</code> y exporta tus vistas.
+            Con cuenta, tus proyectos se guardan en el servidor y puedes volver a ellos; hay un
+            máximo de proyectos por usuario. Si el servidor no pide iniciar sesión, solo conserva
+            los trabajos más recientes. En ambos casos, para tener una copia propia descarga el GLB
+            materializado y <code>materials.json</code> y exporta tus vistas. Las vistas se guardan
+            en este navegador: en otro equipo, impórtalas con
+            <strong>Exportar → Importar views.json…</strong>
           </p>
-        </section>
-
-        <!-- 10 ----------------------------------------------------------------------------- -->
-        <section id="comandos">
-          <h2><span class="g-num">10</span>Referencia de comandos</h2>
-          <div class="g-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Comando</th>
-                  <th>Para qué</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>just setup</code></td>
-                  <td>Instalar todo</td>
-                </tr>
-                <tr>
-                  <td><code>just serve</code></td>
-                  <td>Servidor local (conversión, materiales, IA)</td>
-                </tr>
-                <tr>
-                  <td><code>just dev</code></td>
-                  <td>Visor</td>
-                </tr>
-                <tr>
-                  <td><code>just doctor</code></td>
-                  <td>Ver qué conversor DWG hay</td>
-                </tr>
-                <tr>
-                  <td><code>extrude inspect plano.dxf</code></td>
-                  <td>Analizar un plano</td>
-                </tr>
-                <tr>
-                  <td><code>extrude init-config plano.dxf -o proyecto.yaml</code></td>
-                  <td>Borrador de configuración</td>
-                </tr>
-                <tr>
-                  <td><code>extrude convert plano.dwg -c proyecto.yaml -o salida/</code></td>
-                  <td>Convertir (<code>--tiles</code>, <code>--compress</code>)</td>
-                </tr>
-                <tr>
-                  <td><code>extrude library</code></td>
-                  <td>Biblioteca de materiales</td>
-                </tr>
-                <tr>
-                  <td>
-                    <code>extrude validate-materials materials.json --objects objects.json</code>
-                  </td>
-                  <td>Validar un plan</td>
-                </tr>
-                <tr>
-                  <td><code>extrude materialize model.glb materials.json</code></td>
-                  <td>Aplicar materiales</td>
-                </tr>
-                <tr>
-                  <td><code>just validate model.glb</code></td>
-                  <td>Validar un GLB (Khronos)</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p>
-            Opciones de <code>extrude serve</code>: <code>--port</code>, <code>--host</code>,
-            <code>--max-mb</code>, <code>--origin</code>, <code>--jobs-dir</code>,
-            <code>--ai-simulated</code>, <code>--shared --users ARCHIVO</code>.
-          </p>
-          <h3>Modo multiusuario</h3>
-          <p>
-            <code>extrude users add ana --users usuarios.json</code> crea un usuario (la contraseña
-            se guarda con scrypt). Con <code>extrude serve --shared --users usuarios.json</code>, el
-            visor pide iniciar sesión. Cada proyecto es de quien lo crea, y su dueño lo comparte
-            como <em>editor</em> o <em>lector</em>. Quien no tiene permiso no lo ve. Toda
-            confirmación lleva la revisión base: si otra persona confirmó antes, la tuya se rechaza
-            sin perder nada. Hay límites por usuario de intentos de acceso, de trabajos y de
-            consultas de IA.
-          </p>
-          <div class="g-callout">
-            El modo compartido no abre el servidor a la red: sigue en 127.0.0.1. Para usarlo en una
-            red local, pasa <code>--host</code> de forma explícita, detrás de un proxy con HTTPS.
-          </div>
         </section>
 
         <!-- 11 ----------------------------------------------------------------------------- -->
         <section id="problemas">
-          <h2><span class="g-num">11</span>Solución de problemas</h2>
+          <h2><span class="g-num">10</span>Solución de problemas</h2>
           <div class="g-faq">
             <details>
               <summary>No se puede convertir un DWG</summary>
               <p>
-                No hay conversor DWG → DXF. Instala ODA File Converter o LibreDWG (<code
-                  >just doctor</code
-                >) o guarda el plano como DXF.
+                El servidor no tiene conversor de DWG. En tu CAD, <em>Guardar como</em> → DXF 2018
+                (o 2013) y sube el DXF. Si necesitas DWG a menudo, coméntaselo a la administración.
               </p>
             </details>
             <details>
               <summary>El modelo sale diminuto o gigante</summary>
               <p>
-                Unidades mal declaradas: pon <code>units: mm</code> (o la que toque) y compruébalo
-                con <code>inspect</code>.
+                Unidades mal declaradas. En la configuración, pon <code>units: mm</code> (o la que
+                toque) y vuelve a convertir (<a href="#preparar">apartado 4</a>).
               </p>
             </details>
             <details>
               <summary>Faltan edificios</summary>
               <p>
-                No tenían altura. Revisa «sin altura» en el informe; añade
+                No tenían altura. Revisa «sin altura» en el informe; en la configuración, añade
                 <code>default_height</code> o ajusta <code>text_regex</code>.
               </p>
             </details>
             <details>
               <summary>Edificios flotando o enterrados</summary>
               <p>
-                Activa <code>base_from_terrain: true</code> y revisa los casos señalados en el
-                resumen de calidad.
+                Abre <strong>Capas → Revisión del proyecto</strong>, marca la capa y pulsa
+                <strong>Aplicar y reconvertir</strong>: cada objeto se apoya en su terreno. En un
+                plano recién subido ya ocurre de forma automática.
               </p>
             </details>
             <details>
               <summary>Materiales: «Sin biblioteca»</summary>
-              <p><code>extrude serve</code> no está en marcha. Arráncalo y recarga el visor.</p>
+              <p>
+                El visor no conecta con el servidor. Recarga la página; si sigue igual, avisa a la
+                administración.
+              </p>
             </details>
             <details>
               <summary>«Este GLB ya está materializado»</summary>
-              <p>Abriste un GLB con materiales: abre su <code>model.glb</code> base.</p>
+              <p>Abriste un GLB con materiales: abre el GLB convertido original.</p>
             </details>
             <details>
               <summary>IA: proveedor «no disponible»</summary>
               <p>
-                Falta la clave o el modelo en el servidor. El motivo aparece bajo el selector;
-                configúralo y reinicia <code>extrude serve</code>.
+                El servidor no tiene configurado ese proveedor. El motivo aparece bajo el selector.
+                Pide a la administración que lo active; mientras, puedes asignar materiales a mano.
               </p>
             </details>
             <details>
@@ -1188,22 +1184,85 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
               </p>
             </details>
             <details>
+              <summary>«El servidor de Extrude… sigue ejecutando la versión anterior»</summary>
+              <p>
+                El servidor arrancó antes de una actualización y aún usa el código antiguo. Recargar
+                la página no lo arregla: pide a la administración que lo reinicie.
+              </p>
+            </details>
+            <details>
+              <summary>«Generado pero no cargado»</summary>
+              <p>
+                La conversión terminó en el servidor, pero el visor no pudo cargar el modelo nuevo y
+                sigue mostrando el anterior. Pulsa <strong>Reintentar carga</strong>: no se vuelve a
+                convertir.
+              </p>
+            </details>
+            <details>
+              <summary>Faltan edificios aunque no haya avisos de apoyo</summary>
+              <p>
+                Mira en el resumen de calidad las <strong>capas pendientes de revisión</strong>: son
+                capas con geometría que no se han convertido. Clasifícalas en
+                <strong>Capas → Revisión del proyecto</strong>.
+              </p>
+            </details>
+            <details>
+              <summary>
+                Capas: «no hay DWG/DXF ni configuración con que repetir la conversión»
+              </summary>
+              <p>
+                Abriste un GLB o un ejemplo. La altura por capa solo se aplica a planos convertidos:
+                sube el DWG/DXF desde la pantalla de inicio.
+              </p>
+            </details>
+            <details>
+              <summary>Imágenes: el proveedor aparece «no disponible»</summary>
+              <p>
+                El servidor no tiene la clave de ese proveedor de imágenes. Pídela a la
+                administración.
+              </p>
+            </details>
+            <details>
+              <summary>Imágenes: «Menor que la pedida»</summary>
+              <p>
+                El proveedor devolvió menos resolución de la solicitada. Se guarda y se muestra la
+                real; puedes ampliarla (quedará marcada como ampliada) o probar otro modelo.
+              </p>
+            </details>
+            <details>
+              <summary>La captura 4K falla por memoria</summary>
+              <p>
+                La tarjeta gráfica o el navegador no pudieron crear una imagen tan grande. Cierra
+                otras pestañas o captura en HD.
+              </p>
+            </details>
+            <details>
               <summary>Exportar dice que hay una previsualización</summary>
               <p>Hay cambios sin confirmar. Confirma o descarta.</p>
             </details>
             <details>
               <summary>«Inicia sesión para usar este servidor compartido»</summary>
-              <p>El servidor está en modo <code>--shared</code>: entra con tu usuario.</p>
+              <p>
+                Tu sesión caducó o aún no has entrado. Escribe tu usuario y contraseña; si no los
+                tienes, pídelos a la administración.
+              </p>
             </details>
             <details>
               <summary>IA: «falta un dato: Cota de apoyo»</summary>
               <p>El modelo no tiene terreno: escribe la cota en la operación antes de aplicar.</p>
             </details>
             <details>
-              <summary>El puerto 8765 está ocupado</summary>
+              <summary>«No existe ese trabajo» al abrir un proyecto</summary>
               <p>
-                Otro <code>extrude serve</code> sigue abierto. Ciérralo o usa <code>--port</code> y
-                abre el visor con <code>?server=http://127.0.0.1:PUERTO</code>.
+                No tienes acceso a ese proyecto (o se borró). Pide a su dueño o a la administración
+                que te lo compartan.
+              </p>
+            </details>
+            <details>
+              <summary>El visor pide aceptar un servidor remoto</summary>
+              <p>
+                El enlace que abriste indica otro servidor de conversión. Acéptalo solo si confías
+                en él: tus planos se enviarán allí.
               </p>
             </details>
           </div>
@@ -1211,28 +1270,28 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
 
         <!-- 12 ----------------------------------------------------------------------------- -->
         <section id="limitaciones">
-          <h2><span class="g-num">12</span>Compatibilidad y límites</h2>
+          <h2><span class="g-num">11</span>Compatibilidad y límites</h2>
           <p>Antes de empezar, distingue qué requiere otra herramienta y qué necesita revisión.</p>
-          <h3>Formatos y entorno de trabajo</h3>
+          <h3>Formatos</h3>
           <ul class="g-list">
             <li>
-              DWG necesita un conversor externo; los sólidos ACIS no se convierten (expórtalos como
-              malla).
+              El DWG solo se acepta si el servidor tiene conversor; el DXF, siempre. Los sólidos
+              ACIS no se convierten (expórtalos como malla desde el CAD).
             </li>
             <li>
               El GLB con cámaras y el script de Blender parten del estado actual de una sola pieza
               (el maestro en proyectos teselados); no se generan por tesela.
             </li>
             <li>
-              El modo compartido autentica y separa usuarios, pero no sirve HTTPS: para exponerlo,
-              usa un proxy con TLS. Las sesiones se pierden al reiniciar el servidor.
+              Hay un tamaño máximo de plano por subida y un número máximo de consultas de IA por
+              hora; los fija la administración.
             </li>
           </ul>
           <h3>Datos y aproximaciones que debes revisar</h3>
           <ul class="g-list">
             <li>
-              <strong>Alturas:</strong> el YAML automático es un borrador. Contrasta los valores por
-              defecto con tu plano o introduce las alturas conocidas.
+              <strong>Alturas:</strong> la configuración automática es un borrador. Contrasta los
+              valores por defecto con tu plano o introduce las alturas conocidas.
             </li>
             <li>
               <strong>Terreno:</strong> fuera del área triangulada las cotas se extrapolan.
@@ -1254,10 +1313,15 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
 
         <!-- 13 ----------------------------------------------------------------------------- -->
         <section id="glosario">
-          <h2><span class="g-num">13</span>Glosario</h2>
+          <h2><span class="g-num">12</span>Glosario</h2>
           <dl class="g-glossary">
             <dt>GLB / glTF</dt>
             <dd>Formato estándar de modelos 3D; el GLB es un único archivo binario.</dd>
+            <dt>Configuración (YAML)</dt>
+            <dd>
+              Archivo de texto que dice a Extrude qué es cada capa, de dónde sale la altura y en qué
+              unidades está el dibujo.
+            </dd>
             <dt>Etiqueta</dt>
             <dd>
               Nombre estable de un objeto: E-001 (edificio), V-001 (vial), KIOSCO #3 (copia de
@@ -1290,10 +1354,7 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
         </section>
 
         <footer class="g-footer">
-          <p>
-            Extrude · documentación técnica en <code>docs/</code> (CONFIG, EXPORT_FORMATS,
-            EDICION_IA, ARCHITECTURE).
-          </p>
+          <p>Extrude · ¿Dudas con tu cuenta, la IA o el servidor? Consulta a la administración.</p>
           <a class="g-btn g-btn-primary" href="./">Abrir el visor</a>
         </footer>
       </main>

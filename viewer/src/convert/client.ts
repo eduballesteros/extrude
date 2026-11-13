@@ -18,6 +18,10 @@ export interface ConvertResponse {
     config: string;
   };
   report: ConversionReport;
+  /** Revisión de la geometría del resultado; el modelo cargado debe llevar la misma. */
+  revision?: string | null;
+  /** Identidad del código del servidor que lo generó. */
+  build?: string | null;
 }
 
 /**

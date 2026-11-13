@@ -1,4 +1,5 @@
 import './styles.css';
+import './features.css';
 import { installSessionFetch, onAuthRequired, sessionInfo } from './auth/session';
 import { LoginDialog } from './ui/login';
 import { App } from './app';
@@ -13,10 +14,24 @@ import {
   DRAWING_EXTENSIONS,
   hasExtension,
 } from './convert/client';
+import type { ConvertResponse } from './convert/client';
 import { ConversionSession } from './convert/session';
+import { Captures } from './library/captures';
+import { ImageGenClient } from './library/generation';
+import { ImageLibrary } from './library/images';
+import { ProjectClient } from './project/heights';
+import {
+  type ProjectChanges,
+  ProjectLoadError,
+  revisionMismatch,
+  serverNotice,
+} from './project/review';
+import { forgetRecent, loadRecent, saveRecent } from './project/recent';
 import { ConversionDestination } from './convert/destination';
 import { type LoadedModel, ModelDownloadError } from './scene/loader';
 import { FrameOverlay } from './ui/frameOverlay';
+import { GenerateDialog } from './ui/generateDialog';
+import { LibraryActions, LibraryDialog } from './ui/imageLibrary';
 import { Inspector } from './ui/inspector';
 import { MaterialsPanel } from './ui/materialsPanel';
 import { LayersPanel } from './ui/layersPanel';
@@ -26,7 +41,7 @@ import { Toasts } from './ui/toast';
 import { TopBar } from './ui/topbar';
 import { ViewCubeWidget } from './ui/viewCubeWidget';
 import { ViewsPanel } from './ui/viewsPanel';
-import { type ProgressStage, WelcomeScreen } from './ui/welcome';
+import { type ProgressStage, stageLabel, WelcomeScreen } from './ui/welcome';
 import { ViewManager } from './views/viewManager';
 
 const MODEL_EXTENSIONS = ['.glb', '.gltf'];
@@ -50,11 +65,17 @@ const client = new ConversionClient(destination.server, () => destination.assert
 installSessionFetch(destination.server);
 const loginDialog = new LoginDialog(destination.server);
 onAuthRequired(() => {
-  void loginDialog.ask().then((user) => app.notify(`Sesión iniciada como ${user}.`, 'info'));
+  void loginDialog.ask().then((user) => {
+    app.notify(`Sesión iniciada como ${user}.`, 'info');
+    // Servidor con cuentas: la lista de proyectos se pidió antes de entrar (401); ahora sí
+    void offerProjects();
+  });
 });
 void sessionInfo(destination.server)
   .then((info) => {
-    if (info.mode === 'shared' && !info.user) return loginDialog.ask();
+    if (info.mode === 'shared' && !info.user) {
+      return loginDialog.ask().then(() => void offerProjects());
+    }
     return null;
   })
   .catch(() => undefined); // servidor apagado: el visor sigue funcionando sin él
@@ -64,13 +85,45 @@ const tileSize = Number(params.get('tiles')) || undefined;
 
 // --- Espacio de trabajo -----------------------------------------------------------
 
+/** Proyecto abierto que procede de una conversión en el servidor (se puede reconvertir). */
+interface OpenProject {
+  job: string;
+  /** Nombre del plano sin extensión. */
+  base: string;
+}
+let project: OpenProject | null = null;
+const projectClient = new ProjectClient(destination.server);
+
+// Biblioteca única de imágenes del proyecto: la usan el panel de vistas y el menú principal
+const library = new ImageLibrary(undefined, (text) => app.notify(text, 'warning'));
+const captures = new Captures(app, views, library);
+const libraryActions: LibraryActions = new LibraryActions({
+  app,
+  views,
+  captures,
+  generate: (viewId) => generateDialog.open(viewId),
+});
+const generateDialog = new GenerateDialog(libraryActions, new ImageGenClient(destination.server));
+const libraryDialog = new LibraryDialog(libraryActions);
+
 const frame = new FrameOverlay(viewport);
 const topbar = new TopBar(app, views, {
   onClose: () => closeModel(),
   onToggleZen: () => toggleZen(),
+  onOpenLibrary: () => libraryDialog.open(),
 });
-const viewsPanel = new ViewsPanel(app, views, frame);
-const layersPanel = new LayersPanel(app);
+library.on(() => topbar.setLibraryCount(library.images.length));
+const viewsPanel = new ViewsPanel(app, views, frame, libraryActions, (viewId) =>
+  libraryDialog.open(viewId),
+);
+const layersPanel = new LayersPanel(app, {
+  client: projectClient,
+  apply: (changes, onProgress) => applyChanges(changes, onProgress),
+  restore: (onProgress) => restoreProject(onProgress),
+  retryLoad: () => retryLoad(),
+  confirmedRevision: () => materialsPanel.confirmedProjectRevision,
+  projectName: () => project?.base ?? 'proyecto',
+});
 const materialsPanel = new MaterialsPanel(app, {
   server: destination.server,
   views,
@@ -95,7 +148,11 @@ new Sidebar(
   'Inspector',
 );
 const cube = new ViewCubeWidget(app);
-const quality = new QualitySummary();
+const quality = new QualitySummary(() => {
+  // «Revisar apoyo y capas»: la revisión del proyecto está en la pestaña Capas
+  toggleZen(false);
+  left.select('layers');
+});
 viewport.append(cube.element, app.stats.element, quality.element);
 app.on('model', () => quality.clear());
 
@@ -122,6 +179,14 @@ const welcome = new WelcomeScreen(
 
 function closeModel(): void {
   if (welcome.isBusy) return;
+  project = null;
+  layersPanel.setProject(null);
+  libraryDialog.close();
+  generateDialog.close();
+  libraryActions.viewer.close();
+  pendingLoad = null;
+  void offerProjects();
+  void checkServer();
   app.unload();
   topbar.setDownloads([]);
   toggleZen(false);
@@ -150,14 +215,46 @@ async function convertDrawing(
     signal,
     onProgress: (phase, fraction) => progress(`convert:${phase}`, fraction),
   });
+  return showConverted(result, session.file.name.replace(/\.(dwg|dxf)$/i, ''), { signal });
+}
+
+/**
+ * Abre en el visor el resultado de una conversión del servidor y lo deja como proyecto actual:
+ * materiales, descargas, resumen de calidad, altura por capa y «reabrir» tras recargar.
+ * `keepView`: es una reconversión del mismo proyecto; se conservan cámara, sol y capas.
+ * `modelUrl`: revisión confirmada a mostrar al reabrir (por defecto, el modelo convertido).
+ */
+async function showConverted(
+  result: ConvertResponse,
+  base: string,
+  options: { signal?: AbortSignal; keepView?: boolean; modelUrl?: string } = {},
+): Promise<LoadedModel> {
+  const { signal, keepView = false } = options;
   const converted = convertedModel(result);
   if (!converted) {
     throw new ConversionError('La conversión no generó ningún modelo.', 'Revisa el informe.');
   }
-  const base = session.file.name.replace(/\.(dwg|dxf)$/i, '');
   const tiled = converted.kind === 'tiles';
   const href = client.url(converted.url);
-  const model = await app.load(href, tiled ? base : `${base}.glb`, progress, signal);
+  const model = await app.load(
+    tiled ? href : client.url(options.modelUrl ?? converted.url),
+    tiled ? base : `${base}.glb`,
+    keepView ? undefined : progress,
+    signal,
+    { keepView },
+  );
+  // El modelo cargado y el informe deben ser del mismo resultado. (Con `modelUrl` se carga
+  // una revisión confirmada posterior, con ediciones: su geometría es otra a propósito.)
+  if (!options.modelUrl) {
+    const mismatch = revisionMismatch(
+      result.revision ?? result.report.geometry_revision,
+      model.extras?.geometry_revision,
+    );
+    if (mismatch) throw new ProjectLoadError(`${mismatch} Reintenta la carga.`);
+  }
+  project = { job: result.job, base };
+  layersPanel.setProject(result.job);
+  saveRecent({ job: result.job, name: base, server: destination.server });
   // Teselado: se edita el maestro sin comprimir; cada revisión regenera teselas y manifest
   const editable = tiled ? `/api/jobs/${result.job}/model.master.glb` : converted.url;
   materialsPanel.setJob(result.job, editable);
@@ -192,14 +289,177 @@ async function convertDrawing(
   const warnings = result.report.warnings.length;
   if (result.config_generated) {
     app.notify(
-      'Convertido con configuración automática: revísala en Exportar → Resultados.',
+      'Convertido con configuración automática: revísala en Exportar → Conversión.',
       'warning',
     );
-  } else if (warnings) {
+  } else if (warnings && !keepView) {
     app.notify(`Convertido con ${warnings} avisos: consulta el informe.`, 'warning');
   }
   return model;
 }
+
+/** Resultado ya generado en el servidor que el visor aún no ha conseguido cargar. */
+let pendingLoad: { result: ConvertResponse; base: string } | null = null;
+
+/**
+ * Carga en el mismo proyecto un resultado que el servidor ya tiene (reconversión o
+ * recuperación), conservando cámara, sol y capas. Si la carga falla, el resultado queda
+ * pendiente para reintentarlo: el proyecto está actualizado aunque la escena no.
+ */
+async function loadGenerated(result: ConvertResponse, base: string): Promise<void> {
+  try {
+    const model = await showConverted(result, base, { keepView: true });
+    topbar.setModel(model);
+    pendingLoad = null;
+  } catch (error) {
+    pendingLoad = { result, base };
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ProjectLoadError(message);
+  }
+}
+
+/**
+ * Cambios del proyecto (altura, apoyo, tipo de capa): el servidor actualiza el YAML y
+ * reconvierte; el modelo del visor cambia solo cuando esa conversión termina bien.
+ */
+async function applyChanges(
+  changes: ProjectChanges,
+  onProgress: (label: string, fraction: number | null) => void,
+): Promise<void> {
+  const current = project;
+  if (!current) throw new Error('El modelo cargado no procede de una conversión.');
+  const statusPath = await projectClient.reconvert(current.job, changes);
+  const result = await client.resume(statusPath, {
+    onProgress: (phase, fraction) => onProgress(stageLabel(`convert:${phase}`), fraction),
+  });
+  onProgress('Cargando el modelo nuevo', null);
+  await loadGenerated(result, current.base);
+}
+
+/** Recupera el resultado anterior a la última reconversión y lo carga. */
+async function restoreProject(
+  onProgress: (label: string, fraction: number | null) => void,
+): Promise<void> {
+  const current = project;
+  if (!current) throw new Error('El modelo cargado no procede de una conversión.');
+  const result = await projectClient.restore<ConvertResponse>(current.job);
+  onProgress('Cargando el modelo recuperado', null);
+  await loadGenerated(result, current.base);
+}
+
+async function retryLoad(): Promise<void> {
+  if (pendingLoad) await loadGenerated(pendingLoad.result, pendingLoad.base);
+}
+
+/** Reabre un proyecto que conserva el servidor (tras recargar, o para repararlo). */
+async function reopenRecent(recent: { job: string; name: string }): Promise<void> {
+  if (welcome.isBusy) return;
+  const controller = new AbortController();
+  activeLoad = controller;
+  retryOpen = null;
+  welcome.startProgress(true);
+  try {
+    const response = await fetch(client.url(`/api/jobs/${recent.job}/result`), {
+      signal: controller.signal,
+    });
+    if (response.status === 404) {
+      forgetRecent();
+      void offerProjects();
+      throw new ConversionError(
+        `El proyecto «${recent.name}» ya no está en el servidor.`,
+        'Vuelve a subir el plano. Tus vistas e imágenes siguen en este navegador y reaparecerán al convertirlo con el mismo nombre.',
+      );
+    }
+    if (!response.ok) {
+      throw new ConversionError(
+        `No se pudo reabrir el proyecto (${response.status}).`,
+        'Reintenta.',
+      );
+    }
+    const result = (await response.json()) as ConvertResponse;
+    // Revisión confirmada vigente (materiales, ediciones); si no se puede leer, el modelo base
+    const status = (await fetch(client.url(`/api/jobs/${recent.job}/project`), {
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)) as { modelUrl?: string } | null;
+    const model = await showConverted(result, recent.name, {
+      signal: controller.signal,
+      ...(status?.modelUrl ? { modelUrl: status.modelUrl } : {}),
+    });
+    enterWorkspace(model);
+    app.notify(`Proyecto ${recent.name} reabierto`, 'success');
+  } catch (caught) {
+    const error: unknown = controller.signal.aborted ? controller.signal.reason : caught;
+    welcome.showError(
+      error instanceof ConversionError
+        ? `${error.message} ${error.fix}`
+        : `No se pudo reabrir el proyecto: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    activeLoad = null;
+    welcome.endProgress();
+  }
+}
+
+/** Proyectos del servidor en la pantalla de inicio; el último abierto aquí, primero. */
+async function offerProjects(): Promise<void> {
+  const recent = loadRecent(destination.server);
+  try {
+    const projects = await projectClient.projects();
+    const named = projects.map((p) => (p.job === recent?.job ? { ...p, name: recent.name } : p));
+    named.sort((a, b) => Number(b.job === recent?.job) - Number(a.job === recent?.job));
+    welcome.setProjects(named, (entry) => void reopenRecent(entry));
+  } catch {
+    // Servidor anterior o apagado: al menos, el último proyecto abierto en este navegador
+    welcome.setProjects(
+      recent
+        ? [
+            {
+              job: recent.job,
+              name: recent.name,
+              modified: '',
+              floating: 0,
+              buried: 0,
+              outdated: false,
+              revision: null,
+            },
+          ]
+        : [],
+      (entry) => void reopenRecent(entry),
+    );
+  }
+}
+
+/** Avisa si el servidor en marcha no ejecuta el código actual (hay que reiniciarlo). */
+async function checkServer(): Promise<void> {
+  try {
+    serverBanner.set(serverNotice(await projectClient.build()));
+  } catch {
+    serverBanner.set(null); // servidor apagado: ya lo dice la pantalla de inicio al convertir
+  }
+}
+
+const serverBanner = (() => {
+  const text = document.createElement('span');
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = '×';
+  close.title = 'Ocultar aviso';
+  const element = document.createElement('div');
+  element.className = 'server-banner';
+  element.setAttribute('role', 'alert');
+  element.hidden = true;
+  element.append(text, close);
+  close.addEventListener('click', () => (element.hidden = true));
+  document.body.append(element);
+  return {
+    set(message: string | null): void {
+      text.textContent = message ?? '';
+      element.hidden = message === null;
+    },
+  };
+})();
 
 async function open(
   source: string | File,
@@ -253,8 +513,12 @@ async function open(
     const model = session
       ? await convertDrawing(session, controller.signal)
       : await app.load(source, name, progress, controller.signal);
-    if (!(source instanceof File && hasExtension(source.name, DRAWING_EXTENSIONS)))
+    if (!session) {
+      // GLB abierto o ejemplo: no hay plano ni configuración con que repetir la conversión
+      project = null;
+      layersPanel.setProject(null);
       topbar.setDownloads([]);
+    }
     enterWorkspace(model);
     retryOpen = null;
     app.notify(`${model.name} cargado`, 'success');
@@ -375,8 +639,14 @@ window.addEventListener('keydown', (e) => {
 
 // ?debug expone la app para inspeccionarla desde la consola o automatizar pruebas
 if (params.has('debug')) {
-  Object.assign(window as unknown as Record<string, unknown>, { __extrude: app, __views: views });
+  Object.assign(window as unknown as Record<string, unknown>, {
+    __extrude: app,
+    __views: views,
+    __library: library,
+  });
 }
 
+void offerProjects();
+void checkServer();
 const modelParam = params.get('model');
 if (modelParam) void open(modelParam);

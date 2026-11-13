@@ -113,12 +113,7 @@ export class ViewManager {
     const viewportAspect = this.app.viewportAspect;
     state.camera.fovDeg = renderFov(state.camera.fovDeg, viewportAspect, this.aspect);
     state.camera.orthoSize *= frameHeightFraction(viewportAspect, this.aspect);
-    const thumbnail = thumbnailFromCanvas(
-      this.app.renderer,
-      this.app.scene,
-      this.app.nav.camera,
-      this.aspect,
-    );
+    const thumbnail = this.thumbnail();
     const view = createView(
       state,
       name ?? `Vista ${this.views.length + 1}`,
@@ -129,6 +124,49 @@ export class ViewManager {
     this.activeId = view.id;
     this.changed();
     return view;
+  }
+
+  /** Miniatura del encuadre actual, sin ayudas de pantalla (regla, resaltados). */
+  private thumbnail(): string {
+    const restore = this.app.hideHelpers();
+    try {
+      return thumbnailFromCanvas(
+        this.app.renderer,
+        this.app.scene,
+        this.app.nav.camera,
+        this.aspect,
+      );
+    } finally {
+      restore();
+    }
+  }
+
+  /**
+   * Renderiza una vista guardada a `width × height` (su misma proporción) y devuelve el PNG.
+   * Aplica el estado de la vista solo durante el render: la cámara, el sol y las capas del
+   * visor vuelven a como estaban antes de que se pinte el siguiente fotograma.
+   */
+  captureView(id: string, width: number, height: number): Promise<Blob> {
+    this.assertExportable();
+    const view = this.views.find((v) => v.id === id);
+    if (!view) throw new Error('Esa vista ya no existe.');
+    const app = this.app;
+    const previous = app.snapshot();
+    const render = this.render;
+    const active = this.activeId;
+    const restoreHelpers = app.hideHelpers();
+    try {
+      this.restore(id, false);
+      return renderPng(app.renderer, app.scene, app.nav.camera, width, height, () =>
+        app.prepareFrame(),
+      );
+    } finally {
+      restoreHelpers();
+      app.setState(previous, false);
+      this.render = render;
+      this.activeId = active;
+      this.changed(false);
+    }
   }
 
   restore(id: string, animate = true): void {
@@ -187,12 +225,7 @@ export class ViewManager {
    */
   insertPrepared(id: string, name: string, state: ViewerState): void {
     if (this.has(id)) return;
-    const thumbnail = thumbnailFromCanvas(
-      this.app.renderer,
-      this.app.scene,
-      this.app.nav.camera,
-      this.aspect,
-    );
+    const thumbnail = this.thumbnail();
     const view = { ...createView(state, name, this.render, thumbnail), id };
     this.views = [...this.views, view];
     this.activeId = id;
@@ -286,17 +319,17 @@ export class ViewManager {
     this.assertExportable();
     const { width, height } = this.render;
     const app = this.app;
-    // La regla es una ayuda de pantalla (su etiqueta es HTML): no sale en el render
-    const measureVisible = app.measure.group.visible;
-    app.measure.group.visible = false;
-    let blob: Blob;
+    // La regla y los resaltados son ayudas de pantalla: no salen en el render
+    const restoreHelpers = app.hideHelpers();
+    let pending: Promise<Blob>;
     try {
-      blob = await renderPng(app.renderer, app.scene, app.nav.camera, width, height, () =>
+      pending = renderPng(app.renderer, app.scene, app.nav.camera, width, height, () =>
         app.prepareFrame(),
       );
     } finally {
-      app.measure.group.visible = measureVisible;
+      restoreHelpers();
     }
+    const blob = await pending;
     const active = this.views.find((v) => v.id === this.activeId);
     download(blob, `${active?.name ?? 'render'}_${width}x${height}.png`);
   }
