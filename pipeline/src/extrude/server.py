@@ -59,6 +59,7 @@ import math
 import queue
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -207,6 +208,25 @@ class JobStatus:
         return payload
 
 
+def log(message: str) -> None:
+    """Registro del servidor que nunca lanza: una consola que no codifica un carácter, o una
+    salida cerrada, no puede tumbar el hilo que registra (ver ConversionQueue._work)."""
+    stream = sys.stderr or sys.stdout
+    if stream is None:
+        return
+    try:
+        stream.write(message + "\n")
+        stream.flush()
+    except UnicodeEncodeError:
+        try:
+            stream.write(message.encode("ascii", "backslashreplace").decode("ascii") + "\n")
+            stream.flush()
+        except (OSError, ValueError):
+            pass
+    except (OSError, ValueError):
+        pass  # salida cerrada o redirigida a una tubería rota
+
+
 class RequestError(Exception):
     def __init__(self, status: HTTPStatus, problem: str, fix: str) -> None:
         super().__init__(problem)
@@ -222,6 +242,10 @@ class ServerSettings:
     allowed_origins: tuple[str, ...]
     # Escuchando en loopback, solo se aceptan esos nombres en Host (contra DNS rebinding)
     loopback_only: bool = True
+    # Nombres de Host aceptados aunque se escuche en todas las interfaces (--allowed-host)
+    allowed_hosts: frozenset[str] = frozenset()
+    # Detrás de un proxy de confianza (Caddy): la IP del cliente es la última de X-Forwarded-For
+    trust_forwarded: bool = False
     # Modo multiusuario (--shared): cuentas, sesiones, permisos y límites (access.py)
     shared: SharedMode | None = field(default=None, compare=False)
 
@@ -259,12 +283,26 @@ class JobStore:
             for key, value in changes.items():
                 setattr(status, key, value)
 
-    def status(self, job_id: str) -> dict[str, Any] | None:
+    def status(self, job_id: str, *, with_result: bool = True) -> dict[str, Any] | None:
+        """Estado de un trabajo asíncrono. El resultado de uno terminado no se guarda en
+        memoria (puede ocupar cientos de kB por el informe): se lee de su result.json."""
         if not JOB_ID.match(job_id):
             return None
         with self._lock:
             status = self._statuses.get(job_id)
-            return status.as_dict(job_id) if status else None
+            payload = status.as_dict(job_id) if status else None
+        if payload and with_result and payload["state"] == "done" and "result" not in payload:
+            try:
+                path = self.root / job_id / JOB_RESULT
+                payload["result"] = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                payload.update(
+                    state="failed",
+                    error="El resultado de la conversión ya no está en el servidor.",
+                    fix="Vuelve a convertir el plano.",
+                    http_status=int(HTTPStatus.GONE),
+                )
+        return payload
 
     def create(self) -> tuple[str, Path]:
         """Crea la carpeta y la registra como activa de forma atómica respecto a la poda."""
@@ -466,9 +504,14 @@ def run_job_async(
                 job_id, job_dir, source, name, params, config_text, on_phase, replace
             )
         # Primero deja de estar activo y luego se publica: quien vea «done» y envíe otro trabajo
-        # encuentra este ya contado como terminado por la poda.
+        # encuentra este ya contado como terminado por la poda. El resultado ya está en disco
+        # (result.json): en memoria solo queda el estado (ver JobStore.status).
+        saved = job_dir / JOB_RESULT
+        if not saved.is_file():  # la conversión normal ya lo escribe; se garantiza aquí
+            saved.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
         store.finish(job_id)
-        store.update(job_id, state="done", phase="done", fraction=1.0, result=result)
+        del result
+        store.update(job_id, state="done", phase="done", fraction=1.0, result=None)
     except RequestError as exc:
         _failed(store, job_id, exc.status, exc.problem, exc.fix)
     except ExtrudeError as exc:
@@ -476,7 +519,7 @@ def run_job_async(
     except ValueError as exc:
         _failed(store, job_id, HTTPStatus.BAD_REQUEST, str(exc), "Revisa los parámetros.")
     except Exception as exc:  # el hilo no debe morir en silencio: el visor espera un estado
-        print(f"[extrude serve] Error inesperado en {job_id}: {exc!r}", flush=True)
+        log(f"[extrude serve] Error inesperado en {job_id}: {exc!r}")
         _failed(
             store,
             job_id,
@@ -542,15 +585,32 @@ class ConversionQueue:
         self._jobs.put((job, name, params, config_text, replace))
 
     def _work(self) -> None:
+        """Único hilo de conversión: nada de lo que pase en un trabajo puede terminarlo, o
+        todos los siguientes quedarían en cola para siempre."""
         while True:
             job, name, params, config_text, replace = self._jobs.get()
             try:
                 run_job_async(self.store, self.lock, job, name, params, config_text, replace)
+            except BaseException as exc:
+                log(f"[extrude serve] Fallo interno en {job[0]}: {exc!r}")
             finally:
-                self.store.finish(job[0])
-                self.release()
-                self.store.prune()  # al terminar, no solo al crear: la retención no crece
-                self._jobs.task_done()
+                try:
+                    status = self.store.status(job[0], with_result=False) or {}
+                    if status.get("state") in ACTIVE_STATES:  # nunca «en curso» para siempre
+                        _failed(
+                            self.store,
+                            job[0],
+                            HTTPStatus.INTERNAL_SERVER_ERROR,
+                            "Error interno al convertir.",
+                            "Revisa el registro de extrude serve y vuelve a intentarlo.",
+                        )
+                    self.store.finish(job[0])
+                    self.store.prune()  # al terminar, no solo al crear: la retención no crece
+                except BaseException as exc:
+                    log(f"[extrude serve] Fallo al cerrar {job[0]}: {exc!r}")
+                finally:
+                    self.release()
+                    self._jobs.task_done()
 
 
 def _failed(store: JobStore, job_id: str, status: HTTPStatus, problem: str, fix: str) -> None:
@@ -913,7 +973,16 @@ def make_handler(
         timeout = REQUEST_TIMEOUT_S  # StreamRequestHandler: settimeout() del socket
 
         def log_message(self, format: str, *args: Any) -> None:
-            print(f"[extrude serve] {self.address_string()} {format % args}", flush=True)
+            log(f"[extrude serve] {self.address_string()} {format % args}")
+
+        def client_ip(self) -> str:
+            """IP del cliente. Detrás de Caddy (--trust-forwarded) la conexión llega del proxy:
+            se usa la última entrada de X-Forwarded-For, la que añade el propio proxy."""
+            if settings.trust_forwarded:
+                forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[-1].strip()
+                if forwarded:
+                    return forwarded
+            return str(self.client_address[0])
 
         # --- utilidades ---------------------------------------------------
         def _cors(self) -> None:
@@ -1206,13 +1275,19 @@ def make_handler(
 
         # --- rutas --------------------------------------------------------
         def _forbidden_host(self) -> bool:
-            """DNS rebinding: un dominio ajeno que resuelve a 127.0.0.1 llega con su Host."""
-            if not settings.loopback_only or host_name(self.headers.get("Host")) in LOOPBACK_HOSTS:
+            """DNS rebinding: un dominio ajeno que resuelve a 127.0.0.1 llega con su Host.
+            Con --allowed-host se exige uno de esos nombres aunque se escuche en 0.0.0.0 (el
+            Docker local); escuchando en loopback, los nombres locales."""
+            host = host_name(self.headers.get("Host"))
+            if settings.allowed_hosts:
+                if host in settings.allowed_hosts:
+                    return False
+            elif not settings.loopback_only or host in LOOPBACK_HOSTS:
                 return False
             self._error(
                 HTTPStatus.MISDIRECTED_REQUEST,
-                "Host no permitido para un servidor local.",
-                "Usa http://127.0.0.1 o http://localhost.",
+                "Host no permitido para este servidor.",
+                "Abre Extrude con su dirección habitual (p. ej. http://localhost).",
             )
             return True
 
@@ -1311,7 +1386,7 @@ def make_handler(
                     return
                 user, password = str(body.get("user", "")), str(body.get("password", ""))
                 try:
-                    token = shared.login(user, password)
+                    token = shared.login(user, password, self.client_ip())
                 except ExtrudeError as exc:
                     self._error(HTTPStatus.TOO_MANY_REQUESTS, exc.problem, exc.fix)
                     return
@@ -1832,11 +1907,19 @@ def create_server(
     ai: AiService | None = None,
     shared: SharedMode | None = None,
     images: ImageService | None = None,
+    allowed_hosts: tuple[str, ...] = (),
+    trust_forwarded: bool = False,
 ) -> ThreadingHTTPServer:
     root = jobs_dir or Path(tempfile.gettempdir()) / "extrude-jobs"
     loopback = host_name(host) in LOOPBACK_HOSTS
     settings = ServerSettings(
-        root, max_mb * 1_048_576, allowed_origins, loopback_only=loopback, shared=shared
+        root,
+        max_mb * 1_048_576,
+        allowed_origins,
+        loopback_only=loopback,
+        allowed_hosts=frozenset(host_name(h) for h in allowed_hosts if h.strip()),
+        trust_forwarded=trust_forwarded,
+        shared=shared,
     )
     store = JobStore(root)
     if shared is not None:
@@ -1852,13 +1935,14 @@ def create_server(
                 shared.access.grant_owner(job_id, user)
 
         store.on_create = owner
-    return BoundedHTTPServer(
-        (host, port),
-        make_handler(
-            settings,
-            store,
-            ConversionQueue(store),
-            ai,
-            images or ImageService(root / "_images"),
-        ),
+    handler = make_handler(
+        settings, store, ConversionQueue(store), ai, images or ImageService(root / "_images")
     )
+    try:
+        return BoundedHTTPServer((host, port), handler)
+    except OSError as exc:
+        raise ExtrudeError(
+            f"No se puede escuchar en {host}:{port}: {exc.strerror or exc}.",
+            "Probablemente otro `extrude serve` sigue abierto en ese puerto: ciérralo o usa "
+            "--port (y abre el visor con ?server=http://127.0.0.1:PUERTO).",
+        ) from exc

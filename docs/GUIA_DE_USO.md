@@ -224,8 +224,9 @@ Opciones útiles:
 - **Rótulos tipo Catastro** (`IV`, `II`): `text_regex: '^\s*([IVXL]+)\b'`.
 - **«B+3»** = baja + 3: `text_regex: 'B\s*\+\s*(\d+)'` y `floor_offset: 1`.
 - **Atributo de bloque**: `height_from: attribute`, `attribute: ALTURA`, `value_means: meters`.
-- **Apoyar en el terreno**: `base_from_terrain: true`. Los edificios mantienen la planta
-  horizontal y añaden un zócalo hasta el terreno.
+- **Apoyar en el terreno**: lo hace solo `base_auto: true`, que es lo que escribe el
+  borrador. Cada objeto se apoya sobre el terreno bajo su huella; los edificios mantienen la
+  planta horizontal y añaden un zócalo. Ver [APOYO_Y_COTAS.md](APOYO_Y_COTAS.md).
 - **Bloques repetidos** (árboles, mobiliario): se instancian solos si hay al menos
   `instancing_min` copias iguales (10 por defecto), lo que acelera el visor.
 
@@ -639,7 +640,9 @@ la pestaña Materiales y exporta tus vistas (`views.json`).
 | `just validate out/…/model.glb` | Validar un GLB con el validador de Khronos |
 | `just check` | Pruebas y comprobaciones (desarrollo) |
 
-Opciones de `extrude serve`: `--port`, `--host`, `--max-mb` (tamaño máximo del plano), `--origin`
+Opciones de `extrude serve`: `--port`, `--host`, `--allowed-host` (nombres aceptados en la cabecera
+Host al escuchar en todas las interfaces), `--trust-forwarded` (detrás de un proxy propio),
+`--max-mb` (tamaño máximo del plano), `--origin`
 (orígenes del visor permitidos, repetible), `--jobs-dir`, `--ai-simulated`, `--shared --users
 ARCHIVO` (modo multiusuario).
 
@@ -672,7 +675,7 @@ inverso).
 | El modelo sale diminuto o gigante | Unidades mal declaradas | `units: mm` (o la que toque) en el YAML; compruébalo con `inspect` |
 | Faltan edificios | No tenían altura | Revisa «sin altura» en el informe; añade `default_height` o ajusta `text_regex` |
 | Alturas raras | Rótulos ambiguos o fuera de la planta | Revisa el resumen de calidad; acota `text_layers` y `text_tolerance` |
-| Edificios flotando o enterrados | Apoyo en terreno | Usa `base_from_terrain: true`; revisa los casos señalados en el informe |
+| Edificios flotando o enterrados | Apoyo en terreno (proyectos antiguos o base explícita) | En el visor, **Capas → Revisión del proyecto → Aplicar y reconvertir**; o `base_auto: true` en su regla |
 | Todo lejísimos del origen | Coordenadas UTM sin recentrar | `recenter: true` (por defecto) |
 | Materiales: «Sin biblioteca» | `extrude serve` no está en marcha | Arráncalo y recarga el visor |
 | Materiales: «Este GLB ya está materializado» | Abriste un GLB con materiales | Abre su `model.glb` base |
@@ -687,7 +690,7 @@ inverso).
 | «Inicia sesión para usar este servidor compartido» | Servidor en `--shared` | Entra con tu usuario; pide una cuenta a quien administra el servidor |
 | «Proyecto teselado sin GLB maestro» | Convertido con una versión anterior | Vuelve a convertir con `--tiles` |
 | IA: «falta un dato: Cota de apoyo» | El modelo no tiene terreno | Escribe la cota en la operación |
-| El puerto 8765 está ocupado | Otro `extrude serve` sigue abierto | Ciérralo o usa `--port` (y abre el visor con `?server=http://127.0.0.1:PUERTO`) |
+| «No se puede escuchar en 127.0.0.1:8765» | Otro `extrude serve` sigue abierto (también en Windows: el puerto es exclusivo) | Ciérralo o usa `--port` (y abre el visor con `?server=http://127.0.0.1:PUERTO`) |
 
 ---
 

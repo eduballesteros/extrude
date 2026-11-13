@@ -63,7 +63,8 @@ excluyentes por objeto (`ground_check` y `ground_details`):
 | `extrapolated` (cobertura) | La huella sale del TIN |
 
 **Qué acredita:** los puntos muestreados (contorno, cortes con las aristas del TIN y vértices
-interiores). **Qué no:** no es una validación estructural, no detecta errores menores de 1 m ni
+interiores). Los objetos que siguen la pendiente (viales, agua, vegetación) también se miden:
+el punto más bajo de su malla en cada posición del contorno frente al terreno. **Qué no:** no es una validación estructural, no detecta errores menores de 1 m ni
 dice si la implantación (plataformas, accesos, cota de planta) es correcta. Un zócalo de más de
 3 m se señala para revisión aunque el contacto esté resuelto.
 

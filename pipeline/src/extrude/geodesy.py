@@ -21,7 +21,7 @@ UTM_FALSE_NORTHING_SOUTH = 10_000_000.0
 _UTM_EPSG: tuple[tuple[int, int, bool], ...] = (
     (32601, 32660, False),  # WGS 84 / UTM norte
     (32701, 32760, True),  # WGS 84 / UTM sur
-    (25801, 25860, False),  # ETRS89 / UTM (Europa: 25828 a 25838)
+    (25828, 25838, False),  # ETRS89 / UTM zonas 28 a 38 (los únicos que existen)
     (26901, 26923, False),  # NAD83 / UTM (Norteamérica)
 )
 _EPSG = re.compile(r"^\s*EPSG\s*:\s*(\d+)\s*$", re.IGNORECASE)
@@ -61,7 +61,7 @@ def utm_zone(crs: str | None) -> tuple[int, bool] | None:
     code = int(match.group(1))
     for first, last, south in _UTM_EPSG:
         if first <= code <= last:
-            return code - first + 1, south
+            return code % 100, south  # el número de zona son las dos últimas cifras
     return None
 
 

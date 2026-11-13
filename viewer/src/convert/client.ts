@@ -9,6 +9,11 @@ export const DEFAULT_SERVER =
 export const CONFIG_HEADER = 'X-Extrude-Config';
 export const DRAWING_EXTENSIONS = ['.dwg', '.dxf'];
 export const CONFIG_EXTENSIONS = ['.yaml', '.yml'];
+/**
+ * La configuración viaja en Base64 en una cabecera: el servidor (http.server) no admite
+ * líneas de cabecera de más de 64 kB. Se deja margen para el resto de cabeceras.
+ */
+export const MAX_CONFIG_HEADER_BYTES = 60 * 1024;
 
 export interface ConvertResponse {
   job: string;
@@ -161,6 +166,22 @@ export function hasExtension(name: string, extensions: string[]): boolean {
   return extensions.some((ext) => lower.endsWith(ext));
 }
 
+/**
+ * Qué hacer si el servidor no responde: en desarrollo (servidor en este equipo), arrancarlo;
+ * si es un servidor web, no hay nada que arrancar desde el navegador.
+ */
+export function unreachableFix(server: string): string {
+  let host = '';
+  try {
+    host = new URL(server).hostname;
+  } catch {
+    // dirección inválida: se trata como remota
+  }
+  return ['localhost', '127.0.0.1', '[::1]'].includes(host)
+    ? 'Arráncalo con: cd pipeline && uv run extrude serve'
+    : 'Recarga la página en unos minutos; si sigue sin responder, avisa a la administración del servidor.';
+}
+
 function base64Utf8(text: string): string {
   let binary = '';
   for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
@@ -180,7 +201,7 @@ export class ConversionClient {
   private unreachable(): ConversionError {
     return new ConversionError(
       `No se pudo contactar con el servidor de conversión (${this.server}).`,
-      'Arráncalo con: cd pipeline && uv run extrude serve',
+      unreachableFix(this.server),
     );
   }
 
@@ -287,7 +308,16 @@ export class ConversionClient {
       );
     }
     const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
-    if (configYaml) headers[CONFIG_HEADER] = base64Utf8(configYaml);
+    if (configYaml) {
+      const encoded = base64Utf8(configYaml);
+      if (encoded.length > MAX_CONFIG_HEADER_BYTES) {
+        throw new ConversionError(
+          `La configuración YAML es demasiado grande (${Math.round(configYaml.length / 1024)} kB): el máximo es de unos ${Math.floor((MAX_CONFIG_HEADER_BYTES * 3) / 4 / 1024)} kB.`,
+          'Quita comentarios o reglas que no se usen y vuelve a soltarla.',
+        );
+      }
+      headers[CONFIG_HEADER] = encoded;
+    }
     let query = `name=${encodeURIComponent(file.name)}`;
     if (options.tiles !== undefined) {
       if (!Number.isFinite(options.tiles) || !(options.tiles > 0)) {

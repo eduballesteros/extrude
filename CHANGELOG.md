@@ -2,6 +2,21 @@
 
 ## Sin publicar
 
+### Correcciones de la auditoría del servidor
+
+- El hilo de conversión ya no muere ante un error al registrar otro error: el trabajo acaba
+  en «failed» y los siguientes se convierten; el registro nunca lanza.
+- Un segundo `extrude serve` en el mismo puerto falla con un mensaje claro (en Windows el
+  puerto es exclusivo: antes arrancaba y se repartían las conexiones).
+- `--allowed-host` exige el Host también al escuchar en todas las interfaces (producción lo
+  pasa con el dominio publicado), contra DNS rebinding.
+- Límites de acceso por cliente y usuario y por cliente en total (`--trust-forwarded` detrás
+  de Caddy); los fallos de un tercero ya no bloquean al dueño de la cuenta; claves acotadas.
+- Los estados de trabajos terminados no guardan el informe en memoria (se lee de disco).
+- El contacto de los objetos que siguen la pendiente se mide en la malla.
+- Solo se aceptan los EPSG UTM que existen; el visor rechaza un YAML demasiado grande con un
+  mensaje claro y no propone comandos si el servidor es web.
+
 ### Apoyo sobre el terreno y revisión del proyecto
 
 - Apoyo automático por objeto (`base_auto`) en las importaciones nuevas, decidido con el
