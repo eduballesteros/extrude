@@ -1,0 +1,7 @@
+extend = "../pipeline/pyproject.toml"
+
+[lint.per-file-ignores]
+# Smoke es un ejecutable de comprobación, con aserciones y origen HTTPS validado.
+"smoke.py" = ["S101", "S310"]
+# exec sustituye el proceso con el CLI instalado; escucha solo en la red de Compose.
+"runtime.py" = ["S606", "S607", "S104"]

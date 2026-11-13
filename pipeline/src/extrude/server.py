@@ -82,6 +82,7 @@ from extrude.converters import converter_statuses, ensure_dxf
 from extrude.dxf_reader import read_dxf
 from extrude.edit_tools import tools_payload
 from extrude.errors import ExtrudeError
+from extrude.http_server import BoundedHTTPServer
 from extrude.image_gen import ImageError, ImageService, parse_references, suggest_prompt
 from extrude.init_config import draft_config
 from extrude.layer_heights import (
@@ -1851,7 +1852,7 @@ def create_server(
                 shared.access.grant_owner(job_id, user)
 
         store.on_create = owner
-    return ThreadingHTTPServer(
+    return BoundedHTTPServer(
         (host, port),
         make_handler(
             settings,

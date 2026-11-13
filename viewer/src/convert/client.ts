@@ -1,7 +1,11 @@
 /** Cliente del servidor local de conversión (`extrude serve`). */
 import type { ConversionReport } from './report';
 
-export const DEFAULT_SERVER = 'http://127.0.0.1:8765';
+/** Vite en desarrollo conserva el pipeline local; el build usa el origen del visor. */
+export const DEFAULT_SERVER =
+  import.meta.env.PROD && typeof location !== 'undefined'
+    ? location.origin
+    : 'http://127.0.0.1:8765';
 export const CONFIG_HEADER = 'X-Extrude-Config';
 export const DRAWING_EXTENSIONS = ['.dwg', '.dxf'];
 export const CONFIG_EXTENSIONS = ['.yaml', '.yml'];

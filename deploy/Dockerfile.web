@@ -1,0 +1,15 @@
+FROM node:22.22.0-bookworm-slim AS viewer-build
+WORKDIR /build/viewer
+COPY viewer/package*.json ./
+RUN npm ci
+COPY viewer/ ./
+COPY samples/glb/ /build/samples/glb/
+RUN npm run build && test -s dist/guia.html \
+    && test -s dist/draco/draco_decoder.wasm && test -s dist/models/block_2d.glb \
+    && find dist/assets -name '*.woff2' | grep -q .
+
+FROM caddy:2.10.2-alpine
+RUN mkdir -p /data/caddy /config/caddy && chown -R 10001:10001 /data /config
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=viewer-build /build/viewer/dist /srv
+USER 10001:10001
