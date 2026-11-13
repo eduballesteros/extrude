@@ -2,7 +2,7 @@ name: Deployment artifacts
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['deploy/**', '.dockerignore', 'pipeline/**', 'tools/**', 'viewer/**']
+    paths: ['deploy/**', 'compose.yaml', '.dockerignore', '.github/workflows/deploy-check.yml', 'pipeline/**', 'tools/**', 'viewer/**']
 permissions:
   contents: read
 jobs:
@@ -30,6 +30,20 @@ jobs:
           docker compose exec -T api node --version
           docker compose exec -T api python /opt/extrude/runtime.py health
           docker compose exec -T api python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8765/api/auth/me")); assert d == {"mode":"shared","user":None}'
+      - name: Check local Compose
+        run: |
+          docker compose config --quiet
+          docker compose up -d --build --wait
+          curl --fail --retry 10 --retry-connrefused --retry-delay 2 http://localhost:8080/ -o /dev/null
+          curl --fail http://localhost:8080/api/health
+          curl --fail http://localhost:8080/api/auth/me
+          curl --fail -H 'Origin: http://localhost:8080' -H 'Content-Type: application/octet-stream' --data-binary @samples/block_2d.dxf 'http://localhost:8080/api/convert?name=block_2d.dxf'
+      - name: Collect local status
+        if: always()
+        run: docker compose ps -a && docker compose logs --tail=100
+      - name: Stop local containers
+        if: always()
+        run: docker compose down
       - name: Collect status
         if: always()
         working-directory: deploy

@@ -1,0 +1,33 @@
+{
+    admin off
+    auto_https off
+}
+
+# Solo estos nombres: una web ajena que resuelva su dominio a 127.0.0.1 (DNS rebinding)
+# no encuentra sitio y no llega a la API.
+http://localhost:8080, http://127.0.0.1:8080 {
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options DENY
+        -Server
+    }
+    encode zstd gzip
+    @api path /api /api/*
+    handle @api {
+        header Cache-Control no-store
+        request_body {
+            max_size 104857600
+        }
+        reverse_proxy api:8765 {
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 900s
+            }
+        }
+    }
+    handle {
+        root * /srv
+        file_server
+    }
+}

@@ -33,6 +33,43 @@ temas claro y oscuro. Versión de desarrollo: **0.1.0**.
 
 ## Inicio rápido
 
+### Con Docker en local
+
+Abre Docker Desktop con contenedores Linux (o Docker Engine con Compose en Linux).
+Desde la raíz del repositorio:
+
+```sh
+docker compose up -d --build
+```
+
+Abre **[localhost:8080](http://localhost:8080)**. Incluye el visor, los ejemplos y la API;
+no necesitas instalar Python, Node ni configurar dominio, certificados o usuarios.
+La primera construcción descarga las dependencias y puede tardar varios minutos.
+El puerto se publica solo en este ordenador, sin inicio de sesión.
+
+```sh
+docker compose ps             # estado de los servicios
+docker compose logs -f        # ver registros (Ctrl+C para salir)
+docker compose down           # parar; conserva los datos
+docker compose up -d --build  # arrancar o reconstruir tras actualizar el código
+```
+
+Los trabajos se guardan en el volumen `extrude-local_projects`, con la retención del
+modo local (los 10 trabajos terminados más recientes). Las vistas se guardan en el
+navegador: usa siempre la misma dirección para recuperarlas. `docker compose down -v`
+borra el volumen de trabajos. La imagen admite DXF y GLB/GLTF; para DWG, convierte
+antes el plano a DXF, pues no incluye ODA ni LibreDWG.
+
+La IA es opcional: añade las claves necesarias (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`) a un archivo `.env` en la raíz, con una línea `NOMBRE=valor` por clave,
+y ejecuta de nuevo `docker compose up -d`. Ese archivo está excluido de Git y de las
+imágenes; las claves se pasan únicamente a la API. No compartas la salida de
+`docker compose config` si has configurado claves.
+
+Para un servidor con HTTPS y usuarios, utiliza el [despliegue de producción](deploy/README.md).
+
+### Entorno de desarrollo
+
 Desde la carpeta del repositorio, con los [requisitos](#requisitos) instalados:
 
 ```sh

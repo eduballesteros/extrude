@@ -1,0 +1,84 @@
+name: extrude-local
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.api
+    command:
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8765'
+      - --jobs-dir
+      - /data/jobs
+      - --origin
+      - http://localhost:8080
+      - --origin
+      - http://127.0.0.1:8080
+      - --max-mb
+      - '100'
+      # Escucha en todas las interfaces de la red de Compose: se exige el Host del visor
+      - --allowed-host
+      - localhost
+      - --allowed-host
+      - 127.0.0.1
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - projects:/data/jobs
+    read_only: true
+    tmpfs:
+      - /tmp:size=536870912,uid=10001,gid=10001,mode=1770
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    mem_limit: 4g
+    pids_limit: 128
+    stop_grace_period: 30s
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, /opt/extrude/runtime.py, health]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    ports:
+      - '127.0.0.1:8080:8080'
+    volumes:
+      - ./deploy/Caddyfile.local:/etc/caddy/Caddyfile:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16777216,uid=10001,gid=10001
+      - /data:uid=10001,gid=10001
+      - /config:uid=10001,gid=10001
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 64
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/api/health']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+volumes:
+  projects:

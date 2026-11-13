@@ -8,14 +8,19 @@
   en «failed» y los siguientes se convierten; el registro nunca lanza.
 - Un segundo `extrude serve` en el mismo puerto falla con un mensaje claro (en Windows el
   puerto es exclusivo: antes arrancaba y se repartían las conexiones).
-- `--allowed-host` exige el Host también al escuchar en todas las interfaces (producción lo
-  pasa con el dominio publicado), contra DNS rebinding.
+- `--allowed-host` exige el Host también al escuchar en todas las interfaces (Docker local y
+  producción), contra DNS rebinding; Caddy local solo atiende `localhost` y `127.0.0.1`.
 - Límites de acceso por cliente y usuario y por cliente en total (`--trust-forwarded` detrás
   de Caddy); los fallos de un tercero ya no bloquean al dueño de la cuenta; claves acotadas.
 - Los estados de trabajos terminados no guardan el informe en memoria (se lee de disco).
 - El contacto de los objetos que siguen la pendiente se mide en la malla.
 - Solo se aceptan los EPSG UTM que existen; el visor rechaza un YAML demasiado grande con un
   mensaje claro y no propone comandos si el servidor es web.
+
+### Docker local
+
+- Arranque del visor y la API con `docker compose up -d --build`, accesible en
+  `http://localhost:8080`, con volumen de trabajos y claves de IA opcionales.
 
 ### Apoyo sobre el terreno y revisión del proyecto
 
