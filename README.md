@@ -27,6 +27,9 @@ temas claro y oscuro. Versión de desarrollo: **0.1.0**.
 - Explorar el modelo por capas, medir distancias y estudiar el sol por fecha y ubicación.
 - Guardar vistas con miniaturas y exportar PNG, views.json, scripts de Blender o un GLB con cámaras y luces.
 - Dividir modelos grandes en teselas e instanciar bloques compatibles para reducir draw calls.
+- Ajustar la altura de cada capa desde el visor, resaltar capas y medir con lupa.
+- Capturar vistas en HD y 4K y generar imágenes arquitectónicas con IA a partir de ellas
+  ([docs/VISTAS_E_IMAGENES.md](docs/VISTAS_E_IMAGENES.md)).
 
 ## Inicio rápido
 
@@ -339,8 +342,30 @@ Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para el flujo de cambios.
 | `POST /api/convert?name=plano.dxf&async=1` | Aceptar un trabajo y devolver su ruta de estado |
 | `GET /api/jobs/<id>/status` | Fase, progreso y resultado o error |
 | `GET /api/jobs/<id>/…` | Modelo, informes, YAML, manifest y teselas |
+| `GET /api/projects` | Proyectos convertidos que conserva el servidor y que el usuario puede ver |
+| `GET /api/jobs/<id>/result` | Recuperar el resultado de conversión para reabrir el proyecto |
+| `GET /api/jobs/<id>/layers-config` | Configuración y ajustes de altura por capa; indica si se puede reconvertir |
+| `GET /api/jobs/<id>/review` | Revisar apoyo, terreno, capas pendientes y disponibilidad de recuperación |
+| `POST /api/jobs/<id>/reconvert` | Aplicar ajustes al YAML y reconvertir el plano guardado; devuelve 202 y ruta de estado |
+| `POST /api/jobs/<id>/restore` | Recuperar el resultado anterior a la última reconversión, incluido su YAML |
 | `GET /api/library`, `POST /api/models`, `POST /api/jobs/<id>/materials` | Materiales (Fase 2) |
 | `GET /api/tools`, `GET /api/ai/providers`, `POST /api/jobs/<id>/ai/{context,propose,cache/clear}`, `POST /api/jobs/<id>/edit/apply`, `GET /api/jobs/<id>/project`, `POST /api/jobs/<id>/project/{undo,redo}` | Edición con IA y revisiones ([docs/EDICION_IA.md](docs/EDICION_IA.md)) |
+| `GET /api/images/providers` | Proveedores de imágenes disponibles, límites y asistencia de prompt; sin claves |
+| `POST /api/images/plan` | Consultar la resolución que se pediría; sin generar ni consumir una llamada de imagen |
+| `POST /api/images/suggest` | Proponer una redacción del prompt con Claude; no genera imágenes |
+| `POST /api/images/generate` | Iniciar una generación asíncrona; devuelve 202 y el trabajo |
+| `GET /api/images/jobs/<id>` | Consultar el estado y resultado de la generación |
+| `GET /api/images/jobs/<id>/file` | Descargar la imagen generada |
+| `POST /api/images/jobs/<id>/cancel` | Dejar de esperar y descartar el resultado; el proveedor puede continuar y facturar |
+
+Las rutas de reconversión e imágenes reciben JSON (`Content-Type: application/json`).
+La reconversión acepta `heights: {capa: metros o null}` y/o
+`adjust: {capa: {height, support, kind, z_height}}`; los campos son opcionales y `null`
+quita el ajuste correspondiente. `support` admite `"auto"` y `z_height`, `"ignore"`
+(dejar de interpretar Z como altura). El progreso se consulta en la ruta `/status` devuelta.
+`restore` recibe `{}` y devuelve el resultado recuperado; no es el mismo historial que
+`project/undo` y `project/redo`. Consulta [apoyo y cotas](docs/APOYO_Y_COTAS.md) y
+[alturas e imágenes](docs/VISTAS_E_IMAGENES.md) para los flujos y sus limitaciones.
 
 El cliente envía `Content-Type: application/octet-stream` y, opcionalmente,
 `X-Extrude-Config` con el YAML en Base64 UTF-8. `tiles` y `compress` son parámetros opcionales.

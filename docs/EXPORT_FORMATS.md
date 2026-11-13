@@ -48,7 +48,7 @@ glTF 2.0 binario, generado sin librerías externas (`pipeline/src/extrude/gltf_e
   | `layer`, `kind`, `visible` | de la regla del YAML |
   | `source_entities` | `{tipo DXF: nº}` leídos en la capa |
   | `triangle_count` | triángulos de la capa, instancias incluidas |
-  | `ground_check` | Si hay TIN: `checked`, `floating` (base sobre todo el terreno), `buried` (cubierta bajo todo el terreno), `intersecting` (el terreno entra entre base y cubierta) y `partially_buried` (supera la cubierta solo en parte de la huella). Categorías excluyentes, con tolerancia de 1 m. Las intersecciones con ladera son informativas y no recomiendan reasentar automáticamente. También disponible por capa en `report.json`. |
+  | `ground_check` | Diagnóstico de apoyo cuando hay terreno utilizable y objetos extruidos comprobables. Incluye `checked`, `floating`, `buried`, `intersecting`, `partially_buried`, `partial_gap` y `unverified` (ver semántica debajo). También disponible por capa en `report.json`. |
   | `objects` | arrays paralelos por objeto: `id` (identidad persistente, ver `objects.json`), `label` (E-001…), `height`, `floors`, `base`, `foundation_height`, `height_origin`, `source_type`, `handle`. En edificios adaptados al terreno, `base` es la cota de planta horizontal y `foundation_height` el desnivel máximo del zócalo bajo ella; no se suma a `height` ni a `floors`. Los handles de bloques con zócalo corresponden al INSERT original. |
 
 - **Identificador de objeto:** el atributo de vértice `_OBJECT_ID` (float; redondéalo) es el
@@ -77,10 +77,36 @@ glTF 2.0 binario, generado sin librerías externas (`pipeline/src/extrude/gltf_e
 - **Materiales:** PBR metallic-roughness. El color del YAML (sRGB) se convierte a lineal en
   `baseColorFactor`. Con `opacity` < 1 se usa `alphaMode: BLEND`.
 
+### Diagnóstico de apoyo (`ground_check`)
+
+Los contadores se refieren a objetos extruidos comprobados, no a todos los triángulos ni a
+todas las mallas 3D importadas. La tolerancia de apoyo es de 1 m.
+
+| Campo | Significado |
+|---|---|
+| `checked` | Número de objetos comprobados. |
+| `floating` | Base por encima de todo el terreno bajo la huella; con zócalo se comprueba el contacto de su geometría inferior. |
+| `buried` | Cubierta por debajo de todo el terreno bajo la huella. |
+| `intersecting` | El terreno penetra por encima de la base sin superar la cubierta. Es informativo: no implica por sí solo reasentar el objeto. |
+| `partially_buried` | El terreno supera la cubierta en parte de la huella. Requiere revisión. |
+| `partial_gap` | Contacto parcial: quedan separaciones respecto al terreno mayores que la tolerancia, sin clasificarse como flotación completa, intersección o enterramiento. |
+| `unverified` | No se pudo medir el contacto del zócalo en la malla generada. Se mantienen las comprobaciones generales de cotas; no equivale a apoyo correcto. |
+
+Las cinco categorías geométricas son excluyentes. `unverified` es una condición adicional
+que puede coexistir con ellas: no se deben sumar todos los campos para obtener `checked`.
+Los detalles por objeto y la cobertura del TIN están en `ground_details` y `terrain_coverage`
+del informe. Un apoyo extrapolado fuera del TIN no acredita topografía medida.
+
 ### Teselas (`--tiles <m>`)
 
 Cada objeto va a la tesela de su centro XY (las instancias, a la de su traslación). Todas las
 teselas comparten el mismo `origin_offset`, así que se cargan juntas sin desplazarlas.
+
+En la conversión teselada, `node.extras.ground_check` conserva los recuentos **globales de la
+capa completa**, repetidos en cada tesela que contiene esa capa. No describen solo los objetos
+de esa tesela y no deben sumarse entre teselas. El visor toma el diagnóstico del primer nodo
+de la capa. Para el resumen global, usa una sola copia por capa o los valores de `report.json`;
+el formato actual no ofrece un diagnóstico de apoyo independiente por tesela.
 
 `out/manifest.json`:
 ```json
