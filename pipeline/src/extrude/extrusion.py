@@ -4,16 +4,24 @@
 - Paredes: un quad por arista con vértices propios (sombreado plano). Con exterior CCW y
   huecos CW, el lado derecho de cada arista es siempre "fuera del sólido".
 - Tapa inferior opcional (normal -Z): solo si el edificio se ve desde abajo.
+- UV de pared en metros (RG-03): u = distancia recorrida sobre el contorno (continua en las
+  esquinas, creciente de izquierda a derecha visto desde fuera), v = cota absoluta, así las hiladas
+  quedan horizontales y alineadas entre paños. Las tapas no llevan UV propias (NaN): al exportar
+  se proyectan en planta.
+- Cada triángulo lleva su superficie semántica (`surfaces.Surface`): cubierta, fachada exterior,
+  fachada de patio, tapa inferior. Una huella sin altura es suelo (`GROUND`).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import mapbox_earcut
 import numpy as np
 from numpy.typing import NDArray
 from shapely.geometry import Polygon
+
+from extrude.surfaces import Surface
 
 MIN_TRIANGLE_AREA = 1e-10  # m²
 MIN_EDGE_LENGTH = 1e-9  # m
@@ -23,14 +31,45 @@ MIN_EDGE_LENGTH = 1e-9  # m
 class MeshData:
     vertices: NDArray[np.float64]  # (N, 3)
     faces: NDArray[np.int64]  # (M, 3), CCW visto desde fuera
+    # (M,) uint8 con un `Surface` por triángulo; None = todo GENERIC
+    surfaces: NDArray[np.uint8] | None = None
+    # (N, 2) UV en metros por vértice; filas NaN (o None) = proyección en planta al exportar
+    uvs: NDArray[np.float64] | None = None
 
     @property
     def triangle_count(self) -> int:
         return len(self.faces)
 
+    @property
+    def face_surfaces(self) -> NDArray[np.uint8]:
+        if self.surfaces is not None:
+            return self.surfaces
+        return np.full(len(self.faces), Surface.GENERIC, dtype=np.uint8)
+
+    @property
+    def vertex_uvs(self) -> NDArray[np.float64]:
+        if self.uvs is not None:
+            return self.uvs
+        return np.full((len(self.vertices), 2), np.nan)
+
     @staticmethod
     def empty() -> MeshData:
-        return MeshData(np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64))
+        return MeshData(
+            np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), np.zeros(0, dtype=np.uint8)
+        )
+
+
+def labeled(mesh: MeshData, surface: Surface) -> MeshData:
+    """La misma malla con todos sus triángulos en `surface`."""
+    return replace(mesh, surfaces=np.full(len(mesh.faces), surface, dtype=np.uint8))
+
+
+def as_ground(mesh: MeshData) -> MeshData:
+    """Viales, agua, vegetación: su cubierta y sus cantos son una sola superficie de suelo
+    (la tapa inferior se conserva aparte)."""
+    surfaces = mesh.face_surfaces.copy()
+    surfaces[surfaces != Surface.UNDERSIDE] = Surface.GROUND
+    return replace(mesh, surfaces=surfaces)
 
 
 def concat(meshes: list[MeshData]) -> MeshData:
@@ -39,7 +78,17 @@ def concat(meshes: list[MeshData]) -> MeshData:
     offsets = np.cumsum([0] + [len(m.vertices) for m in meshes[:-1]])
     vertices = np.vstack([m.vertices for m in meshes])
     faces = np.vstack([m.faces + off for m, off in zip(meshes, offsets, strict=True)])
-    return MeshData(vertices, faces.astype(np.int64))
+    surfaces = (
+        np.concatenate([m.face_surfaces for m in meshes])
+        if any(m.surfaces is not None for m in meshes)
+        else None
+    )
+    uvs = (
+        np.vstack([m.vertex_uvs for m in meshes])
+        if any(m.uvs is not None for m in meshes)
+        else None
+    )
+    return MeshData(vertices, faces.astype(np.int64), surfaces, uvs)
 
 
 def box_corners(vertices: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -64,7 +113,8 @@ def drop_degenerate(mesh: MeshData) -> tuple[MeshData, int]:
     if mesh.triangle_count == 0:
         return mesh, 0
     keep = triangle_areas(mesh.vertices, mesh.faces) > MIN_TRIANGLE_AREA
-    return MeshData(mesh.vertices, mesh.faces[keep]), int((~keep).sum())
+    surfaces = mesh.surfaces[keep] if mesh.surfaces is not None else None
+    return replace(mesh, faces=mesh.faces[keep], surfaces=surfaces), int((~keep).sum())
 
 
 def extrude(polygon: Polygon, base: float, height: float, *, bottom: bool) -> MeshData:
@@ -72,11 +122,16 @@ def extrude(polygon: Polygon, base: float, height: float, *, bottom: bool) -> Me
     rings = [_ring(polygon.exterior.coords)] + [_ring(r.coords) for r in polygon.interiors]
     top = _cap(rings, base + height, up=True)
     if height <= 0:
-        return top
-    parts = [top, _walls(rings, base, base + height)]
+        return labeled(top, Surface.GROUND)
+    parts = [labeled(top, Surface.ROOF), _walls(rings, base, base + height)]
     if bottom:
-        parts.append(_cap(rings, base, up=False))
+        parts.append(labeled(_cap(rings, base, up=False), Surface.UNDERSIDE))
     return concat(parts)
+
+
+def ring_surface(index: int) -> Surface:
+    """Anillo 0 = contorno exterior; el resto son huecos interiores (patios)."""
+    return Surface.FACADE_EXTERIOR if index == 0 else Surface.FACADE_COURTYARD
 
 
 def _ring(coords: object) -> NDArray[np.float64]:
@@ -101,16 +156,36 @@ def _cap(rings: list[NDArray[np.float64]], z: float, *, up: bool) -> MeshData:
 
 def _walls(rings: list[NDArray[np.float64]], z0: float, z1: float) -> MeshData:
     quads = []
-    for ring in rings:
-        a = ring
-        b = np.roll(ring, -1, axis=0)
+    for index, ring in enumerate(rings):
         n = len(ring)
-        verts = np.empty((n, 4, 3))
-        verts[:, 0, :2], verts[:, 0, 2] = a, z0
-        verts[:, 1, :2], verts[:, 1, 2] = b, z0
-        verts[:, 2, :2], verts[:, 2, 2] = b, z1
-        verts[:, 3, :2], verts[:, 3, 2] = a, z1
-        base = np.arange(n)[:, None] * 4
-        faces = np.concatenate([base + np.array([0, 1, 2]), base + np.array([0, 2, 3])])
-        quads.append(MeshData(verts.reshape(-1, 3), faces.astype(np.int64)))
+        quads.append(wall_quads(ring, np.full(n, z0), np.full(n, z1), ring_surface(index)))
     return concat(quads)
+
+
+def wall_quads(
+    ring: NDArray[np.float64],
+    bottom: NDArray[np.float64],
+    top: NDArray[np.float64],
+    surface: Surface,
+) -> MeshData:
+    """Un quad por arista del anillo cerrado `ring` (sin repetir el cierre), con cotas propias
+    en cada vértice, vértices propios y UV de pared en metros."""
+    n = len(ring)
+    if n < 2:
+        return MeshData.empty()
+    nxt = np.roll(np.arange(n), -1)
+    verts = np.empty((n, 4, 3))
+    verts[:, 0, :2], verts[:, 0, 2] = ring, bottom
+    verts[:, 1, :2], verts[:, 1, 2] = ring[nxt], bottom[nxt]
+    verts[:, 2, :2], verts[:, 2, 2] = ring[nxt], top[nxt]
+    verts[:, 3, :2], verts[:, 3, 2] = ring, top
+    lengths = np.linalg.norm(ring[nxt] - ring, axis=1)
+    start = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
+    uvs = np.empty((n, 4, 2))
+    uvs[:, 0, 0] = uvs[:, 3, 0] = start
+    uvs[:, 1, 0] = uvs[:, 2, 0] = start + lengths
+    uvs[:, :, 1] = verts[:, :, 2]
+    base = np.arange(n)[:, None] * 4
+    faces = np.concatenate([base + np.array([0, 1, 2]), base + np.array([0, 2, 3])])
+    surfaces = np.full(len(faces), surface, dtype=np.uint8)
+    return MeshData(verts.reshape(-1, 3), faces.astype(np.int64), surfaces, uvs.reshape(-1, 2))

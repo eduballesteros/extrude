@@ -8,6 +8,14 @@ Prioridad de la altura de un polígono:
   4. `default_height`.
 Si ninguna da valor: los edificios se descartan (y se reportan); viales, agua y vegetación
 quedan como superficie plana.
+
+Cota de la base (excluyentes):
+  - `base_from_terrain`: sobre el terreno (TIN) bajo la huella;
+  - `base_from_elevation`: la cota Z de la huella, tal cual (base explícita);
+  - `base_auto`: lo decide Extrude por objeto según la evidencia disponible;
+  - ninguna: `base_elevation` fija.
+Con `height_from: elevation` la Z de la huella es la cota ABSOLUTA de cubierta: la altura es
+esa cota menos la cota real de la base (terreno incluido), nunca la suma de ambas.
 """
 
 from __future__ import annotations
@@ -113,11 +121,17 @@ class LayerRule(_Strict):
     base_elevation: float = 0.0
     base_from_elevation: bool = False
     base_from_terrain: bool = False
+    # Apoyo automático por objeto según la evidencia: terreno válido → apoyo en el terreno;
+    # sin terreno → cota Z de la huella si la tiene; si no, base_elevation (ver build.py)
+    base_auto: bool = False
     terrain_support: Literal["foundation", "minimum"] = "foundation"
     detect_holes: bool = True
     bottom_cap: bool = False
     material: Material | None = None
     visible: bool = True
+    # La clasificación de la capa se ha revisado (p. ej. «ignorar» decidido en el visor): el
+    # informe deja de proponerla como pendiente de revisión.
+    reviewed: bool = False
 
     @field_validator("text_regex")
     @classmethod
@@ -136,8 +150,10 @@ class LayerRule(_Strict):
             raise ValueError("height_from: attribute requiere 'attribute' (etiqueta del ATTRIB)")
         if self.height_from is HeightSource.BLOCK and not self.block_values:
             raise ValueError("height_from: block requiere 'block_values' {nombre de bloque: valor}")
-        if self.base_from_elevation and self.base_from_terrain:
-            raise ValueError("base_from_elevation y base_from_terrain son excluyentes: elige uno")
+        if sum((self.base_from_elevation, self.base_from_terrain, self.base_auto)) > 1:
+            raise ValueError(
+                "base_from_elevation, base_from_terrain y base_auto son excluyentes: elige uno"
+            )
         if any(v < 0 for v in self.block_values.values()):
             raise ValueError("block_values no admite valores negativos")
         return self

@@ -6,6 +6,10 @@
 - El resto (viales, agua, vegetación, bloques en pendiente) se "drapea": la huella se trocea con
   los triángulos del TIN y cada vértice toma la cota del terreno, siguiendo la pendiente.
 Fuera del TIN se usa la cota del vértice de terreno más cercano.
+
+El zócalo de un edificio se separa de la fachada en la cota de planta (RG-02): cada pared se
+parte en dos quads coplanares, terreno → planta (FOUNDATION) y planta → cubierta (fachada). La
+envolvente no cambia; solo se añade la arista horizontal de la planta.
 """
 
 from __future__ import annotations
@@ -18,7 +22,16 @@ from scipy.spatial import Delaunay, QhullError
 from shapely.geometry import LineString, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from extrude.extrusion import MeshData, concat, extrude
+from extrude.extrusion import (
+    MeshData,
+    concat,
+    drop_degenerate,
+    extrude,
+    labeled,
+    ring_surface,
+    wall_quads,
+)
+from extrude.surfaces import Surface
 
 MIN_PIECE_AREA = 1e-8  # m²
 MIN_TERRAIN_POINTS = 3
@@ -84,10 +97,14 @@ class TerrainSurface:
         """Superficie (y paredes si `height` > 0) que sigue el terreno: cota = terreno + offset."""
         candidates = self._tree.query(polygon, predicate="intersects")
         pieces = self._pieces(polygon, candidates)
-        parts = [self._draped_cap(piece, offset + height) for piece in pieces]
+        top = Surface.ROOF if height > 0 else Surface.GROUND
+        parts = [labeled(self._draped_cap(piece, offset + height), top) for piece in pieces]
         if height > 0:
             rings = [polygon.exterior, *polygon.interiors]
-            parts += [self._draped_wall(ring, candidates, offset, height) for ring in rings]
+            parts += [
+                self._draped_wall(ring, candidates, offset, height, ring_surface(i))
+                for i, ring in enumerate(rings)
+            ]
         return concat([p for p in parts if p.triangle_count])
 
     def building(
@@ -106,14 +123,23 @@ class TerrainSurface:
         ]
         outline = Polygon(rings[0], rings[1:])
         pieces = self._pieces(outline, candidates)
-        parts = [extrude(piece, floor + height, 0.0, bottom=False) for piece in pieces]
-        for xy in rings:
+        parts = [
+            labeled(extrude(piece, floor + height, 0.0, bottom=False), Surface.ROOF)
+            for piece in pieces
+        ]
+        for i, xy in enumerate(rings):
             ground = self.height(xy) + offset
-            parts.append(_walls(xy, ground, np.full(len(xy), floor + height)))
+            plan = np.full(len(xy), floor)
+            # Zócalo terreno → planta; donde el terreno toca la planta sus triángulos son
+            # degenerados: se quitan aquí para no dejar caras sin área en la malla cerrada.
+            foundation = _walls(xy, np.minimum(ground, plan), plan, Surface.FOUNDATION)
+            parts.append(drop_degenerate(foundation)[0])
+            if height > 0:
+                parts.append(_walls(xy, plan, plan + height, ring_surface(i)))
         if bottom:
             for piece in pieces:
                 cap = self._draped_cap(piece, offset)
-                parts.append(MeshData(cap.vertices, cap.faces[:, ::-1]))
+                parts.append(labeled(MeshData(cap.vertices, cap.faces[:, ::-1]), Surface.UNDERSIDE))
         return concat(parts)
 
     def _pieces(self, polygon: Polygon, candidates: NDArray[np.int64]) -> list[Polygon]:
@@ -129,11 +155,16 @@ class TerrainSurface:
         return MeshData(vertices, flat.faces)
 
     def _draped_wall(
-        self, ring: BaseGeometry, candidates: NDArray[np.int64], offset: float, height: float
+        self,
+        ring: BaseGeometry,
+        candidates: NDArray[np.int64],
+        offset: float,
+        height: float,
+        surface: Surface,
     ) -> MeshData:
         xy = self._densify(LineString(ring.coords), candidates)
         bottom = self.height(xy) + offset
-        return _walls(xy, bottom, bottom + height)
+        return _walls(xy, bottom, bottom + height, surface)
 
     def _densify(self, line: LineString, candidates: NDArray[np.int64]) -> NDArray[np.float64]:
         """Vértices del anillo + cortes con las aristas del TIN (sin repetir el cierre)."""
@@ -162,18 +193,10 @@ def _polygons(geometry: BaseGeometry | NDArray[np.object_]) -> list[Polygon]:
 
 
 def _walls(
-    ring: NDArray[np.float64], bottom: NDArray[np.float64], top: NDArray[np.float64]
+    ring: NDArray[np.float64],
+    bottom: NDArray[np.float64],
+    top: NDArray[np.float64],
+    surface: Surface,
 ) -> MeshData:
     """Un quad por arista con cotas propias en cada extremo (mismo convenio que extrusion)."""
-    n = len(ring)
-    if n < 2:
-        return MeshData.empty()
-    nxt = np.roll(np.arange(n), -1)
-    verts = np.empty((n, 4, 3))
-    verts[:, 0, :2], verts[:, 0, 2] = ring, bottom
-    verts[:, 1, :2], verts[:, 1, 2] = ring[nxt], bottom[nxt]
-    verts[:, 2, :2], verts[:, 2, 2] = ring[nxt], top[nxt]
-    verts[:, 3, :2], verts[:, 3, 2] = ring, top
-    base = np.arange(n)[:, None] * 4
-    faces = np.concatenate([base + np.array([0, 1, 2]), base + np.array([0, 2, 3])])
-    return MeshData(verts.reshape(-1, 3), faces.astype(np.int64))
+    return wall_quads(ring, bottom, top, surface)

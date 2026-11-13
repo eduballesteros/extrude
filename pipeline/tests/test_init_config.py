@@ -93,9 +93,9 @@ def test_draft_seats_layers_without_elevation_on_terrain(tmp_path: Path) -> None
     doc.saveas(path)
     config = parse_config(yaml.safe_load(draft_config(read_dxf(path))))
     by = {r.match: r for r in config.layers}
-    assert by["ZONA VERDE"].base_from_terrain
-    assert by["EDIF"].base_from_terrain
-    assert not by["CURVAS"].base_from_terrain
+    assert by["ZONA VERDE"].base_auto
+    assert by["EDIF"].base_auto
+    assert not by["CURVAS"].base_auto
 
 
 def test_draft_with_contours_only_seats_buildings_on_terrain(tmp_path: Path) -> None:
@@ -117,8 +117,8 @@ def test_draft_with_contours_only_seats_buildings_on_terrain(tmp_path: Path) -> 
     rules_by_match = {r.match: r for r in parse_config(yaml.safe_load(text)).layers}
     assert rules_by_match["CURVAS"].kind is Kind.TERRAIN
     assert rules_by_match["EDIF"].kind is Kind.BUILDING
-    assert rules_by_match["EDIF"].base_from_terrain
-    assert "base_from_terrain: true" in text
+    assert rules_by_match["EDIF"].base_auto
+    assert "base_auto: true" in text
 
 
 @pytest.mark.parametrize("terrain_z", [-60.0, 20.0, None])
@@ -151,8 +151,14 @@ def test_draft_prefers_terrain_to_unverified_building_bases(
     rule = config.rule_for("-EDIFICIOS")
     assert rule is not None
     assert rule.height_from is HeightSource.TEXT
-    assert rule.base_from_terrain is (terrain_z is not None)
-    assert rule.base_from_elevation is (terrain_z is None)
+    # La base no se fija en el borrador: la decide la política automática al convertir
+    assert rule.base_auto and not rule.base_from_terrain and not rule.base_from_elevation
+    origins = build_scene(read, config).layers["-EDIFICIOS"].stats.base_origins
+    if terrain_z is not None:
+        assert set(origins) == {"terrain"}
+    else:
+        # Sin terreno: la Z de la huella (si la tiene) es una base inferida; si no, cota 0
+        assert origins["source_elevation_inferred"] == sum(z != 0 for z in building_z)
     geometry = build_scene(read, config).layers["-EDIFICIOS"]
     assert len(geometry.objects) == 2
     assert [obj.height for obj in geometry.objects] == [12.0, 12.0]
@@ -167,23 +173,45 @@ def test_draft_prefers_terrain_to_unverified_building_bases(
         assert geometry.stats.ground.buried == 0
 
 
-def test_draft_keeps_elevation_as_height_when_no_other_source(tmp_path: Path) -> None:
+@pytest.mark.parametrize("terrain_z", [None, -60.0, 20.0])
+@pytest.mark.parametrize("building_z", [-15.0, 35.0])
+def test_draft_uses_provisional_height_and_terrain_for_unverified_z(
+    tmp_path: Path, terrain_z: float | None, building_z: float
+) -> None:
     import ezdxf
 
     doc = ezdxf.new("R2018")
     msp = doc.modelspace()
-    for y in (0, 40):
-        msp.add_lwpolyline([(0, y), (40, y)], dxfattribs={"layer": "CURVAS", "elevation": 10 + y})
+    doc.units = 6
+    if terrain_z is not None:
+        for y in (0, 40):
+            msp.add_lwpolyline(
+                [(0, y), (40, y)],
+                dxfattribs={"layer": "CURVAS", "elevation": terrain_z + y / 10},
+            )
     msp.add_lwpolyline(
         [(5, 5), (10, 5), (10, 10), (5, 10)],
         close=True,
-        dxfattribs={"layer": "EDIFICIOS", "elevation": 35},
+        dxfattribs={"layer": "_BLOQUES LINEALES", "elevation": building_z},
     )
     path = tmp_path / "coronacion.dxf"
     doc.saveas(path)
-    config = parse_config(yaml.safe_load(draft_config(read_dxf(path))))
-    rule = config.rule_for("EDIFICIOS")
+    read = read_dxf(path)
+    text = draft_config(read)
+    config = parse_config(yaml.safe_load(text))
+    rule = config.rule_for("_BLOQUES LINEALES")
     assert rule is not None
-    assert rule.height_from is HeightSource.ELEVATION
-    assert not rule.base_from_terrain
+    assert rule.height_from is (HeightSource.ELEVATION if terrain_z is None else None)
+    assert rule.base_auto and not rule.base_from_terrain
     assert not rule.base_from_elevation
+    geometry = build_scene(read, config).layers["_BLOQUES LINEALES"]
+    assert len(geometry.objects) == 1
+    if terrain_z is not None:
+        assert "default_height PROVISIONAL" in text
+        obj = geometry.objects[0]
+        assert obj.height == 9.0
+        assert obj.floor_elevation == pytest.approx(terrain_z + 1.0)
+        assert float(obj.mesh.vertices[:, 2].min()) == pytest.approx(terrain_z + 0.5)
+        assert geometry.stats.ground is not None
+        assert geometry.stats.ground.floating == 0
+        assert geometry.stats.ground.buried == 0

@@ -17,6 +17,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from extrude.build import BuildResult, LineObject, SceneObject, build_scene
+from extrude.catalog import (
+    CATALOG_NAME,
+    build_catalog,
+    export_refs,
+    geometry_revision,
+    write_catalog,
+)
 from extrude.config import Config
 from extrude.converters import ensure_dxf
 from extrude.dxf_reader import read_dxf
@@ -30,6 +37,7 @@ from extrude.node_tools import Compression, compress
 from extrude.report import write_reports
 
 MODEL_NAME = "model.glb"
+MASTER_GLB = "model.master.glb"
 TILES_DIR = "tiles"
 MANIFEST_NAME = "manifest.json"
 MANIFEST_SCHEMA_VERSION = 1
@@ -63,6 +71,8 @@ class ConvertResult:
     outputs: list[OutputFile]
     timings: dict[str, float] = field(default_factory=dict)
     report: dict[str, Any] = field(default_factory=dict)
+    geometry_revision: str | None = None
+    catalog: dict[str, Any] = field(default_factory=dict)
 
 
 class _Timer:
@@ -106,12 +116,14 @@ def convert(source: Path, options: ConvertOptions) -> ConvertResult:
             f"No se pudo geolocalizar el centro con {config.crs}: "
             "revisa el CRS y las coordenadas. Se exporta el modelo sin ubicación solar."
         )
+    revision = geometry_revision(build, config.crs)
     info = SceneInfo(
         origin=origin,
         source_units=read.units.value,
         crs=config.crs,
         center_lat=geographic[0] if geographic else None,
         center_lon=geographic[1] if geographic else None,
+        geometry_revision=revision,
     )
 
     with timer.phase("export"):
@@ -119,14 +131,37 @@ def convert(source: Path, options: ConvertOptions) -> ConvertResult:
             outputs = _write_tiles(layers, info, options.out_dir, options.tile_size)
         else:
             outputs = [_write(layers, info, options.out_dir / MODEL_NAME)]
+        # Maestro editable (sin comprimir, de una pieza) para teselas o compresión: las ediciones
+        # trabajan sobre él y regeneran lo que se entrega (ver master.py)
+        if (options.tile_size and any(o.tile for o in outputs)) or options.compression:
+            _write(layers, info, options.out_dir / MASTER_GLB)
+        # Las referencias a nodos solo valen para un GLB único; con teselas el ID es la única clave.
+        tiled = any(o.tile for o in outputs)
+        catalog = build_catalog(
+            build,
+            revision=revision,
+            source_units=read.units.value,
+            crs=config.crs,
+            origin=origin,
+            export_refs=None if tiled else export_refs(layers),
+        )
+        write_catalog(catalog, options.out_dir / CATALOG_NAME)
     if options.compression is not None:
         with timer.phase("compress"):
             for output in outputs:
                 _compress_in_place(output, options.compression)
     if options.tile_size and any(o.tile for o in outputs):
-        _write_manifest(outputs, info, options.out_dir, options.tile_size)
+        bounds = _bounds(layers)
+        tile_origin = (
+            [float(bounds[0][0]), float(bounds[0][1])] if bounds is not None else [0.0, 0.0]
+        )
+        _write_manifest(
+            outputs, info, options.out_dir, options.tile_size, tile_origin, options.compression
+        )
 
     result = ConvertResult(read, build, layers, origin, outputs, timer.timings)
+    result.geometry_revision = revision
+    result.catalog = catalog
     result.report = write_reports(result, source, options)
     return result
 
@@ -243,17 +278,19 @@ def _write_tiles(
         for line in layer.lines:
             bucket(key(line.points[0, 0], line.points[0, 1]), layer).lines.append(line)
         for group in layer.groups:
-            per_tile: dict[TileKey, list[NDArray[np.float64]]] = defaultdict(list)
-            for matrix in group.matrices:
-                per_tile[key(matrix[0, 3], matrix[1, 3])].append(matrix)
-            for tile, matrices in per_tile.items():
+            per_tile: dict[TileKey, list[int]] = defaultdict(list)
+            for k, matrix in enumerate(group.matrices):
+                per_tile[key(matrix[0, 3], matrix[1, 3])].append(k)
+            for tile, picked in per_tile.items():
                 bucket(tile, layer).groups.append(
                     InstanceGroup(
                         group.block,
                         group.prototype,
                         group.hard_edges,
-                        matrices,
+                        [group.matrices[k] for k in picked],
                         group.objects_per_instance,
+                        [group.object_ids[k] for k in picked] if group.object_ids else [],
+                        group.face_parts,
                     )
                 )
 
@@ -280,15 +317,27 @@ def _tile_bbox(path: Path) -> dict[str, list[float]] | None:
     return bbox
 
 
-def _write_manifest(outputs: list[OutputFile], info: SceneInfo, out_dir: Path, size: float) -> None:
+def _write_manifest(
+    outputs: list[OutputFile],
+    info: SceneInfo,
+    out_dir: Path,
+    size: float,
+    tile_origin: list[float],
+    compression: Compression | None,
+) -> None:
     manifest = {
         "schemaVersion": MANIFEST_SCHEMA_VERSION,
+        "geometry_revision": info.geometry_revision,
         "origin_offset": list(info.origin),
         "units": "m",
         "crs": info.crs,
         "center_lat": info.center_lat,
         "center_lon": info.center_lon,
         "tile_size": size,
+        # Regla de reparto (como _write_tiles) para regenerar teselas desde el maestro editado
+        "tile_origin": tile_origin,
+        "compression": compression.value if compression else None,
+        "master": MASTER_GLB,
         "tiles": [
             {
                 "id": f"{o.tile[0]}_{o.tile[1]}" if o.tile else o.path.stem,

@@ -23,8 +23,10 @@ function maxRenderSize(renderer: WebGLRenderer): number {
 
 /**
  * Renderiza a `width × height` exactamente el encuadre del marco de cámara y devuelve un PNG.
- * Se redimensiona el lienzo de forma síncrona (render + copia del bitmap en la misma tarea) y
- * se restaura enseguida, así que no hay parpadeo.
+ * El tamaño pedido es el del archivo, sin depender del tamaño de la ventana ni de la densidad
+ * de la pantalla. Se redimensiona el lienzo de forma síncrona (render + copia del bitmap en la
+ * misma tarea) y se restaura ANTES de esperar la codificación: no hay parpadeo y quien llama
+ * puede reponer su estado en cuanto esta función devuelve la promesa.
  */
 export async function renderPng(
   renderer: WebGLRenderer,
@@ -61,23 +63,36 @@ export async function renderPng(
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(1);
   renderer.setSize(width, height, false);
+  let encoded: Promise<Blob>;
   try {
     beforeRender?.();
     renderer.render(scene, camera);
+    if (renderer.getContext().isContextLost()) {
+      throw new RenderSizeError(
+        `La tarjeta gráfica se quedó sin memoria al renderizar ${width}×${height}. Cierra otras pestañas o elige una resolución menor.`,
+      );
+    }
     // toBlob copia el bitmap de forma síncrona; la codificación es asíncrona
-    const blob = new Promise<Blob>((resolve, reject) =>
+    encoded = new Promise<Blob>((resolve, reject) =>
       canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('No se pudo codificar el PNG'))),
+        (b) =>
+          b
+            ? resolve(b)
+            : reject(
+                new RenderSizeError(
+                  `El navegador no pudo crear el PNG de ${width}×${height} (memoria insuficiente). Elige una resolución menor.`,
+                ),
+              ),
         'image/png',
       ),
     );
-    return await blob;
   } finally {
     camera.copy(saved as never);
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(previousRatio);
     renderer.setSize(previousSize.x, previousSize.y, false);
   }
+  return encoded;
 }
 
 /** Miniatura JPEG del encuadre del marco a partir del último fotograma renderizado. */

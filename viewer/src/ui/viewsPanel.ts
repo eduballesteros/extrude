@@ -3,6 +3,7 @@ import type { ViewManager } from '../views/viewManager';
 import type { SceneView } from '../views/viewState';
 import { button, h, icon, segmented, toggle } from './dom';
 import type { FrameOverlay } from './frameOverlay';
+import { imageItem, type LibraryActions } from './imageLibrary';
 
 /** Tiempo para confirmar un borrado con un segundo clic (sin diálogos modales). */
 const CONFIRM_MS = 3000;
@@ -35,6 +36,8 @@ export class ViewsPanel {
     private readonly app: App,
     private readonly views: ViewManager,
     private readonly frame: FrameOverlay,
+    private readonly library: LibraryActions,
+    private readonly openLibrary: (viewId?: string) => void,
   ) {
     this.format = segmented<FormatId>(
       RENDER_FORMATS.map((f) => ({ value: f.value, label: f.value, title: f.title })),
@@ -103,6 +106,8 @@ export class ViewsPanel {
       ),
     );
     views.on(() => this.render());
+    // La misma biblioteca que abre el menú principal: una sola lista de imágenes
+    library.ctx.captures.library.on(() => this.render());
     this.render();
   }
 
@@ -143,6 +148,51 @@ export class ViewsPanel {
         ),
       );
     }
+  }
+
+  /** Capturar en HD o 4K, generar con IA y las imágenes ya creadas de la vista. */
+  private images(view: SceneView): HTMLElement {
+    const { captures } = this.library.ctx;
+    const images = captures.library.forView(view.id);
+    const tools = h('div', { class: 'view-tools' });
+    for (const preset of ['HD', '4K'] as const) {
+      const size = captures.size(view, preset);
+      tools.append(
+        button({
+          label: `${preset} ${size.width}×${size.height}`,
+          icon: 'image',
+          title: `Capturar la vista a ${size.width}×${size.height} (${preset}), guardarla en la biblioteca y descargarla`,
+          variant: 'secondary',
+          size: 'sm',
+          onClick: () => void this.library.capture(view, preset),
+        }),
+      );
+    }
+    tools.append(
+      button({
+        label: 'IA',
+        icon: 'palette',
+        title: 'Generar una imagen con IA a partir de esta vista',
+        variant: 'secondary',
+        size: 'sm',
+        onClick: () => this.library.ctx.generate(view.id),
+      }),
+    );
+    const box = h('div', { class: 'view-extra' }, tools);
+    if (images.length) {
+      const list = h('div', { class: 'view-images' });
+      for (const image of images) list.append(imageItem(image, this.library, true));
+      box.append(
+        list,
+        button({
+          label: `Ver en la biblioteca (${images.length})`,
+          variant: 'ghost',
+          size: 'sm',
+          onClick: () => this.openLibrary(view.id),
+        }),
+      );
+    }
+    return box;
   }
 
   private card(view: SceneView, index: number): HTMLLIElement {
@@ -239,6 +289,7 @@ export class ViewsPanel {
       thumb,
       h('div', { class: 'view-body' }, name, meta),
       actions,
+      this.images(view),
     );
   }
 }

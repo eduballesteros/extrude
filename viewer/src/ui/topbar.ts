@@ -1,3 +1,4 @@
+import { downloadWithSession, sessionToken } from '../auth/session';
 import type { App } from '../app';
 import type { LoadedModel, SceneExtras } from '../scene/loader';
 import type { CameraType } from '../state';
@@ -22,6 +23,8 @@ interface MenuItem {
 export interface TopBarHandlers {
   onClose: () => void;
   onToggleZen: () => void;
+  /** Abre la biblioteca de vistas e imágenes del proyecto. */
+  onOpenLibrary: () => void;
 }
 
 /**
@@ -35,6 +38,11 @@ export function originBadge(extras: SceneExtras | null | undefined): string | nu
 }
 
 /** Barra superior del espacio de trabajo (36 px). */
+/** Guía de uso: página aparte (guia.html), en otra pestaña para no perder el modelo abierto. */
+export function openGuide(): void {
+  window.open(new URL('guia.html', document.baseURI).toString(), '_blank', 'noopener');
+}
+
 export class TopBar {
   readonly element: HTMLElement;
   private readonly modelName = h('span', { class: 'model-name' });
@@ -43,6 +51,7 @@ export class TopBar {
   private readonly menu = h('div', { class: 'menu', hidden: true, attrs: { role: 'menu' } });
   private readonly measureButton: HTMLButtonElement;
   private readonly themeButton: HTMLButtonElement;
+  private readonly libraryCount = h('span', { class: 'tab-count' });
   private downloads: DownloadLink[] = [];
 
   constructor(
@@ -123,6 +132,15 @@ export class TopBar {
       h(
         'div',
         { class: 'topbar-right' },
+        this.libraryButton(handlers),
+        button({
+          label: 'Guía',
+          icon: 'info',
+          title: 'Guía de uso (se abre en otra pestaña)',
+          variant: 'ghost',
+          size: 'sm',
+          onClick: () => openGuide(),
+        }),
         this.themeButton,
         button({
           icon: 'zen',
@@ -149,6 +167,25 @@ export class TopBar {
       this.measureButton.classList.toggle('is-active', app.measure.active);
       this.measureButton.setAttribute('aria-pressed', String(app.measure.active));
     });
+  }
+
+  private libraryButton(handlers: TopBarHandlers): HTMLButtonElement {
+    const el = button({
+      label: 'Biblioteca',
+      icon: 'image',
+      title: 'Biblioteca de vistas e imágenes del proyecto: capturas del visor y generadas por IA',
+      variant: 'ghost',
+      size: 'sm',
+      onClick: handlers.onOpenLibrary,
+    });
+    el.classList.add('library-button');
+    el.append(this.libraryCount);
+    return el;
+  }
+
+  /** Número de imágenes de la biblioteca del proyecto (junto al botón). */
+  setLibraryCount(count: number): void {
+    this.libraryCount.textContent = count ? String(count) : '';
   }
 
   setModel(model: LoadedModel): void {
@@ -191,6 +228,7 @@ export class TopBar {
         label: 'PNG',
         hint: `${views.render.width}×${views.render.height}`,
         run: guard(async () => {
+          views.assertExportable(); // antes del aviso: sin «Renderizando» si no se puede
           app.notify('Renderizando PNG…');
           await views.exportPng();
           app.notify('PNG exportado', 'success');
@@ -262,18 +300,26 @@ export class TopBar {
     if (this.downloads.length) {
       this.menu.append(h('div', { class: 'menu-section', textContent: 'Conversión' }));
       for (const link of this.downloads) {
-        this.menu.append(
-          h(
-            'a',
-            {
-              class: 'menu-item',
-              href: link.href,
-              download: link.filename,
-              attrs: { role: 'menuitem' },
-            },
-            ...this.menuEntry('file', link.label, link.filename),
-          ),
+        const anchor = h(
+          'a',
+          {
+            class: 'menu-item',
+            href: link.href,
+            download: link.filename,
+            attrs: { role: 'menuitem' },
+          },
+          ...this.menuEntry('file', link.label, link.filename),
         );
+        // Servidor compartido: el enlace no lleva la sesión; se descarga con fetch
+        anchor.addEventListener('click', (e) => {
+          if (!sessionToken() || !link.href.startsWith('http')) return;
+          e.preventDefault();
+          this.menu.hidden = true;
+          downloadWithSession(link.href, link.filename).catch((err: unknown) =>
+            this.app.notify(err instanceof Error ? err.message : String(err), 'error'),
+          );
+        });
+        this.menu.append(anchor);
       }
     }
     this.menu.hidden = false;

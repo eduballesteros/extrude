@@ -16,6 +16,8 @@ from extrude.model import TextFeature
 from extrude.topology import Footprint
 
 ROMAN = re.compile(r"^[IVXLCDM]+$")
+# Cota Z de una huella que se considera «sin información» (planos 2D: todo a Z = 0)
+NO_ELEVATION_EPS_M = 1e-6
 ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
 
 
@@ -29,6 +31,32 @@ class HeightOrigin(StrEnum):
     DEFAULT = "default_height"
     FLAT = "flat"  # viales, agua, vegetación sin altura: superficie plana
     MISSING = "missing"
+
+
+# Procedencia de una altura para el usuario: lo que el plano acredita, lo que se deduce de
+# una cota y lo que es solo un valor de partida que hay que revisar.
+VERIFIED_ORIGINS = frozenset(
+    {
+        HeightOrigin.ATTRIBUTE,
+        HeightOrigin.TEXT,
+        HeightOrigin.BLOCK,
+        HeightOrigin.FLOORS,
+        HeightOrigin.FIXED,
+    }
+)
+INFERRED_ORIGINS = frozenset({HeightOrigin.ELEVATION})
+PROVISIONAL_ORIGINS = frozenset({HeightOrigin.DEFAULT})
+
+
+def confidence(origin: HeightOrigin | None) -> str:
+    """verified | inferred | provisional | none."""
+    if origin in VERIFIED_ORIGINS:
+        return "verified"
+    if origin in INFERRED_ORIGINS:
+        return "inferred"
+    if origin in PROVISIONAL_ORIGINS:
+        return "provisional"
+    return "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,10 +164,16 @@ class Neighbors:
 
 
 def resolve_height(
-    footprint: Footprint, rule: LayerRule, texts: TextIndex, neighbors: Neighbors | None = None
+    footprint: Footprint,
+    rule: LayerRule,
+    texts: TextIndex,
+    neighbors: Neighbors | None = None,
+    base_reference: float | None = None,
 ) -> HeightResult:
+    """`base_reference`: cota absoluta real de la base del objeto (terreno incluido). Solo la
+    usa `height_from: elevation`, donde la Z de la huella es la cota absoluta de cubierta."""
     if rule.height_from is not None:
-        found = _from_source(footprint, rule, texts, neighbors)
+        found = _from_source(footprint, rule, texts, neighbors, base_reference)
         if found is not None:
             return found
     if rule.floors is not None:
@@ -154,7 +188,11 @@ def resolve_height(
 
 
 def _from_source(
-    footprint: Footprint, rule: LayerRule, texts: TextIndex, neighbors: Neighbors | None
+    footprint: Footprint,
+    rule: LayerRule,
+    texts: TextIndex,
+    neighbors: Neighbors | None,
+    base_reference: float | None = None,
 ) -> HeightResult | None:
     match rule.height_from:
         case HeightSource.ATTRIBUTE:
@@ -171,8 +209,15 @@ def _from_source(
             ]
             return _pick(values, rule, HeightOrigin.BLOCK)
         case HeightSource.ELEVATION:
-            height = footprint.elevation - rule.base_elevation
-            return HeightResult(height, HeightOrigin.ELEVATION) if height > 0 else None
+            # Cubierta absoluta menos base absoluta: nunca se suman dos cotas absolutas.
+            # Una cubierta en la base o por debajo no da altura: se pasa a la siguiente fuente.
+            # Z = 0 es la ausencia de cota de un dibujo 2D, no una cubierta en la cota 0: sobre
+            # un terreno negativo daría un edificio tan alto como profundo es el terreno.
+            if abs(footprint.elevation) <= NO_ELEVATION_EPS_M:
+                return None
+            base = rule.base_elevation if base_reference is None else base_reference
+            height = footprint.elevation - base
+            return HeightResult(height, HeightOrigin.ELEVATION) if height > 1e-6 else None
         case _:
             return None
 

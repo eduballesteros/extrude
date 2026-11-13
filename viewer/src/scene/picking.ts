@@ -6,6 +6,30 @@ export interface PickInfo {
   layer: string | null;
   kind: string | null;
   fields: [string, string][];
+  /** Identidad persistente del objeto pulsado (objects.json), si el GLB la tiene. */
+  objectId: string | null;
+}
+
+/** ID persistente del objeto bajo el punto: tabla de la capa o `object_ids` de la instancia. */
+export function objectIdOfHit(hit: Intersection): string | null {
+  const blockNode = findAncestor(hit.object, 'block');
+  if (blockNode && hit.instanceId !== undefined) {
+    const all = blockNode.userData['object_ids'] as unknown;
+    const ids = Array.isArray(all) ? (all[hit.instanceId] as unknown) : undefined;
+    if (!Array.isArray(ids) || !ids.length) return null;
+    const parts = (hit.object as { geometry?: { attributes: Record<string, BufferAttribute> } })
+      .geometry?.attributes['_object_id'];
+    const part = parts && hit.face ? Math.round(parts.getX(hit.face.a)) : 0;
+    const id: unknown = ids[part] ?? ids[0];
+    return typeof id === 'string' ? id : null;
+  }
+  const layerNode = findAncestor(hit.object, 'layer');
+  const table = layerNode?.userData['objects'] as ObjectTable | undefined;
+  const index = (hit.object as { geometry?: { attributes: Record<string, BufferAttribute> } })
+    .geometry?.attributes['_object_id'];
+  if (!table?.['id'] || !index || !hit.face) return null;
+  const id = table['id'][Math.round(index.getX(hit.face.a))];
+  return typeof id === 'string' ? id : null;
 }
 
 type ObjectTable = Record<string, unknown[]>;
@@ -27,14 +51,36 @@ function format(value: unknown): string {
 }
 
 const FIELD_LABELS: Record<string, string> = {
+  id: 'ID',
+  label: 'Etiqueta',
   height: 'Altura (m)',
   floors: 'Plantas',
   base: 'Cota base (m)',
   height_origin: 'Origen de la altura',
+  height_confidence: 'Fiabilidad de la altura',
+  base_origin: 'Origen de la base',
   foundation_height: 'Zócalo automático (m)',
   source_type: 'Tipo DXF',
   handle: 'Handle',
 };
+
+/** Superficies semánticas del pipeline (atributo `_SURFACE`, ver surfaces.py). */
+export const SURFACE_LABELS: readonly string[] = [
+  'Genérica',
+  'Fachada exterior',
+  'Fachada de patio',
+  'Cubierta',
+  'Zócalo',
+  'Suelo',
+  'Cara inferior',
+];
+
+function surfaceOf(hit: Intersection): string | null {
+  const attribute = (hit.object as { geometry?: { attributes: Record<string, BufferAttribute> } })
+    .geometry?.attributes['_surface'];
+  if (!attribute || !hit.face) return null;
+  return SURFACE_LABELS[Math.round(attribute.getX(hit.face.a))] ?? null;
+}
 
 export function describeHit(hit: Intersection): PickInfo {
   const layerNode = findAncestor(hit.object, 'layer');
@@ -48,6 +94,9 @@ export function describeHit(hit: Intersection): PickInfo {
       'Instancia',
       `${hit.instanceId + 1} de ${format(blockNode.userData['instances'])}`,
     ]);
+    const objectIds = blockNode.userData['object_ids'] as unknown;
+    const ids = Array.isArray(objectIds) ? (objectIds[hit.instanceId] as unknown) : undefined;
+    if (Array.isArray(ids) && ids.length) fields.push(['ID', ids.map(format).join(', ')]);
   } else if (hit.face) {
     const ids = (hit.object as { geometry?: { attributes: Record<string, BufferAttribute> } })
       .geometry?.attributes['_object_id'];
@@ -60,6 +109,8 @@ export function describeHit(hit: Intersection): PickInfo {
       }
     }
   }
+  const surface = surfaceOf(hit);
+  if (surface) fields.push(['Superficie', surface]);
   if (extras['source_entities']) {
     const entities = extras['source_entities'] as Record<string, number>;
     fields.push([
@@ -76,6 +127,7 @@ export function describeHit(hit: Intersection): PickInfo {
     layer: typeof extras['layer'] === 'string' ? extras['layer'] : null,
     kind: typeof extras['kind'] === 'string' ? extras['kind'] : null,
     fields,
+    objectId: objectIdOfHit(hit),
   };
 }
 

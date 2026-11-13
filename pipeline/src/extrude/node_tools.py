@@ -90,6 +90,16 @@ def compress(source: Path, target: Path, method: Compression) -> None:
         )
 
 
+def decompress(source: Path, target: Path) -> None:
+    """GLB comprimido (Draco/Meshopt/cuantizado) → GLB editable (tools/decompress.mjs)."""
+    result = _run([str(_script("decompress.mjs")), _arg(source), _arg(target)])
+    if result.returncode != 0 or not target.is_file():
+        raise NodeToolError(
+            f"No se pudo decodificar {source.name}: {(result.stderr or result.stdout)[-800:]}",
+            "Comprueba que es un GLB válido; si usa otra compresión, conviértelo antes.",
+        )
+
+
 def attributes(path: Path) -> list[dict[str, Any]]:
     """Resumen decodificado (también Draco/Meshopt) de _OBJECT_ID y POSITION por primitiva."""
     result = _run([str(_script("attributes.mjs")), _arg(path)])

@@ -21,6 +21,11 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Configuración y datos privados del despliegue
+deploy/.env
+deploy/private/
+deploy/backups/
+
 # Visor: decodificadores copiados y modelos locales de prueba
 viewer/public/draco/
 viewer/public/models/

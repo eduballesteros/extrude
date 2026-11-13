@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConversionCancelledError, ConversionClient, ConversionTimeoutError } from './client';
 import { ConversionSession } from './session';
-import { download, ModelDownloadError } from '../scene/loader';
+import { loadFromUrl, ModelDownloadError } from '../scene/loader';
 
 const client = new ConversionClient('http://127.0.0.1:8765');
 const file = new File(['drawing'], 'plano.dxf');
@@ -128,7 +128,7 @@ describe('recuperar el mismo trabajo', () => {
     vi.stubGlobal('fetch', fetchMock);
     const converted = await session.run(client, {});
     try {
-      await download(client.url(converted.files.glb!));
+      await loadFromUrl(client.url(converted.files.glb!));
       throw new Error('Se esperaba un resultado caducado');
     } catch (error) {
       expect(error).toBeInstanceOf(ModelDownloadError);

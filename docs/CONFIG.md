@@ -12,9 +12,12 @@ extrude init-config plano.dxf -o proyecto.yaml  # 2. borrador adaptado a ese pla
 extrude convert plano.dxf -c proyecto.yaml -o out/   # 4. convertir (Fase 3)
 ```
 
-`init-config` adivina el `kind` por el nombre de la capa (`EDIF*` → building, `VIAL*`/`CALLE*` →
-road, `AGUA`/`RIO` → water, `VERDE`/`ARBOL` → vegetation, `CURVA`/`NIVEL` → terrain; el resto →
-ignore) y la fuente de altura de los edificios con este orden:
+`init-config` adivina el `kind` por el nombre de la capa (`EDIF*`, `BLOQUE*`, `TORRE*`,
+`VIVIEND*`, `UNIFAMILIAR*`, `NAVE*`… → building; `VIAL*`/`CALLE*` → road; `AGUA`/`RIO`/`LAGUNA`
+→ water; `VERDE`/`ARBOL` → vegetation; `CURVA`/`NIVEL` → terrain; el resto → ignore). Una capa
+de nombre no reconocido no se convierte, pero si contiene contornos cerrados, sombreados o
+mallas queda anotada como **pendiente de revisión** (ver [APOYO_Y_COTAS.md](APOYO_Y_COTAS.md)).
+La fuente de altura de los edificios se elige con este orden:
 
 1. Atributos de bloque cuyo nombre recuerde a plantas/altura (`PLANTAS`, `ALTURA`, `N_PL`,
    `FLOORS`…) → `height_from: attribute`.
@@ -23,9 +26,14 @@ ignore) y la fuente de altura de los edificios con este orden:
    número suelto.
 3. Si los edificios son bloques (INSERT) → `height_from: block` con un `block_values` provisional
    por tipo de bloque (a ajustar).
-4. Polilíneas con cota Z → `height_from: elevation`; si la altura sale de otra fuente y hay cota,
-   se propone `base_from_terrain: true` cuando hay terreno, o `base_from_elevation: true` si no lo hay.
-5. Si no encuentra nada → solo `default_height: 9.0`.
+4. Polilíneas con cota Z, sin terreno utilizable ni otra fuente → `height_from: elevation`
+   (cota de cubierta sobre la cota 0; es una inferencia).
+5. Si no encuentra nada → `default_height: 9.0`, que es **provisional**. Con terreno, una Z
+   por sí sola no se interpreta como altura.
+
+La base de todo lo que se extruye se deja en `base_auto: true`: la decide Extrude al convertir,
+objeto a objeto (ver abajo). El terreno solo cuenta si de verdad se puede triangular con cotas,
+no por el nombre de la capa.
 
 Solo cuenta los textos que caen **dentro** de las plantas (no leyendas ni títulos), y un número
 suelto únicamente si aparece en al menos la mitad de ellas. Los árboles en bloque se proponen como
@@ -34,10 +42,9 @@ volúmenes de 6 m y las capas de "terreno" sin cotas Z se ignoran (no sirven par
 Cada regla generada lleva comentarios con la evidencia (ejemplos de textos, atributos vistos). Es
 un **borrador**: revísalo siempre.
 
-Cuando hay terreno y la altura del edificio sale de textos, atributos o bloques, el borrador apoya
-su base en el TIN aunque algunas plantas tengan Z. Una sola polilínea acotada no garantiza que
-toda la capa tenga cotas de base fiables. Para usar cotas de base verificadas, sustituye
-`base_from_terrain: true` por `base_from_elevation: true` en esa regla.
+Una sola polilínea acotada no garantiza que toda la capa tenga cotas de base fiables. Para usar
+cotas de base verificadas, sustituye `base_auto: true` por `base_from_elevation: true` en esa
+regla: las bases explícitas se respetan siempre y, si no coinciden con el terreno, se avisa.
 
 ## Estructura
 
@@ -81,14 +88,37 @@ layers:              # lista ordenada: gana la PRIMERA regla cuyo patrón encaje
 | `floor_height` | float > 0 (m) | `3.0` | Altura por planta. |
 | `height` | float ≥ 0 (m) | — | Altura fija (prioridad 3). |
 | `default_height` | float ≥ 0 (m) | — | Último recurso (prioridad 4). |
-| `base_elevation` | float (m) | `0.0` | Cota de la base de la extrusión. Con `height_from: elevation`, altura = Z − base. |
+| `base_elevation` | float (m) | `0.0` | Cota de la base de la extrusión (o desplazamiento sobre el terreno o sobre la Z de la huella). |
+| `base_auto` | bool | `false` | Apoyo automático por objeto: con terreno válido, sobre el terreno bajo su huella (como `base_from_terrain`); sin él, usa la Z de la huella como base y suma `base_elevation`, salvo con `height_from: elevation`, donde Z representa la cubierta. Sin cota utilizable, usa `base_elevation`. Es lo que escribe `init-config`. Excluyente con las dos siguientes. |
 | `base_from_elevation` | bool | `false` | La base de cada polígono es su propia cota Z (+ `base_elevation`). Útil cuando las plantas están dibujadas a la cota del terreno. |
-| `base_from_terrain` | bool | `false` | Apoya la capa en el terreno (TIN de las capas `kind: terrain`), sumando `base_elevation`. Edificios: usa `terrain_support`. Viales, agua y vegetación: la superficie se adapta a la pendiente. Bloques (árboles…) en terreno casi llano (desnivel ≤ 1 m): base plana, siguen siendo instancias. Excluyente con `base_from_elevation`. `init-config` lo activa cuando hay terreno en las capas sin cota y en edificios cuya altura viene de textos, atributos o bloques, aunque tengan Z. |
+| `base_from_terrain` | bool | `false` | Apoya la capa en el terreno (TIN de las capas `kind: terrain`), sumando `base_elevation`. Edificios: usa `terrain_support`. Viales, agua y vegetación: la superficie se adapta a la pendiente. Bloques (árboles…) en terreno casi llano (desnivel ≤ 1 m): base plana, siguen siendo instancias. Excluyente con `base_from_elevation` y `base_auto`. Sin terreno utilizable, usa `base_elevation` y avisa. El borrador de `init-config` propone `base_auto`, no esta opción explícita. |
 | `terrain_support` | `foundation` / `minimum` | `foundation` | Para edificios con `base_from_terrain`: `foundation` sitúa la planta en la cota máxima bajo la huella y añade un zócalo hasta el terreno. La cubierta queda horizontal a planta + altura, sin incrementar las plantas asignadas. `minimum` conserva el criterio antiguo: prisma con base en la cota mínima, que puede quedar enterrado en laderas. No afecta a bases explícitas ni al resto de kinds. |
 | `detect_holes` | bool | `true` | Un contorno dentro de otro de la misma capa es un patio (par/impar). Desactívalo si en la capa hay volúmenes contenidos en otros (p. ej. torre sobre podio dibujados en la misma capa). Los HATCH siempre usan par/impar. |
 | `bottom_cap` | bool | `false` | Generar la cara inferior (solo si el modelo se verá desde abajo; ahorra triángulos). |
 | `material` | objeto | según `kind` | `color` (`#rrggbb`), `roughness` y `metalness` (0–1), `opacity` (0–1). |
 | `visible` | bool | `true` | Visibilidad inicial de la capa en el visor. |
+| `reviewed` | bool | `false` | La clasificación de la capa ya se revisó (p. ej. «No convertir» elegido en el visor): el informe deja de proponerla como pendiente. |
+
+### Cota Z, base y cubierta
+
+Una cota Z en una huella no demuestra por sí sola ni la base, ni la cubierta, ni la altura.
+Extrude solo la usa cuando una regla lo dice:
+
+- `height_from: elevation`: la Z es la **cota absoluta de cubierta**. La altura es esa cota
+  menos la cota real de la base (terreno incluido); nunca se suman dos cotas absolutas. Si la
+  cubierta queda en la base o por debajo, o la Z es 0 (ausencia de cota en un dibujo 2D), no da
+  altura y se pasa a la siguiente fuente.
+- `base_from_elevation: true`: la Z es la **cota absoluta de la base**.
+- `base_auto: true` sin terreno: la Z se toma como base (inferencia, así se informa), salvo
+  con `height_from: elevation`, donde sigue representando la cubierta.
+
+Los tres modos de base (`base_auto`, `base_from_elevation`, `base_from_terrain`) son
+mutuamente excluyentes. Con todos desactivados se usa la base fija `base_elevation`.
+La política automática considera ausencia de cota una Z cuya magnitud no supera `1e-6` m;
+sin terreno, esa huella usa `base_elevation`. Con terreno válido, el apoyo automático lo usa
+incluso si la huella tiene Z propia; si esa Z no encaja con el terreno, se informa para revisión.
+En edificios, `terrain_support` también se aplica cuando el terreno se eligió mediante
+`base_auto`. Una altura cero sigue el TIN sin zócalo en ambos modos de apoyo.
 
 ### Prioridad de la altura
 

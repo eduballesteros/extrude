@@ -14,6 +14,10 @@ export interface SceneExtras {
   center_lon?: number | null;
   axis_transform?: string;
   bbox: { min: [number, number, number]; max: [number, number, number] } | null;
+  /** Revisión de la geometría construida (objects.json); falta en GLB anteriores. */
+  geometry_revision?: string;
+  /** Solo en un GLB materializado: revisión del plan de materiales aplicado. */
+  material_revision?: string;
 }
 
 export interface LoadedModel {
@@ -46,6 +50,7 @@ export interface Manifest {
   crs: string | null;
   center_lat?: number | null;
   center_lon?: number | null;
+  geometry_revision?: string;
   tile_size: number;
   tiles: ManifestTile[];
 }
@@ -89,6 +94,12 @@ export function parseManifest(raw: unknown): Manifest {
   }
   if (typeof m.tile_size !== 'number' || !Number.isFinite(m.tile_size) || m.tile_size <= 0) {
     throw new Error('manifest.json: tile_size debe ser finito y > 0.');
+  }
+  if (
+    m.geometry_revision !== undefined &&
+    (typeof m.geometry_revision !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(m.geometry_revision))
+  ) {
+    throw new Error('manifest.json: geometry_revision no válida.');
   }
   for (const [key, limit] of [
     ['center_lat', 90],
@@ -147,6 +158,7 @@ export function manifestExtras(manifest: Manifest): SceneExtras {
     center_lat: manifest.center_lat ?? null,
     center_lon: manifest.center_lon ?? null,
     bbox: unionBbox(manifest.tiles),
+    ...(manifest.geometry_revision ? { geometry_revision: manifest.geometry_revision } : {}),
   };
 }
 
@@ -213,15 +225,7 @@ async function parse(
  * Descarga leyendo el cuerpo por fragmentos para informar del progreso real
  * (si el servidor envía Content-Length; si no, la fase es indeterminada).
  */
-export async function download(
-  url: string,
-  onProgress?: ProgressCallback,
-  signal?: AbortSignal,
-): Promise<ArrayBuffer> {
-  return (await downloadResource(url, onProgress, signal)).bytes;
-}
-
-async function downloadResource(
+export async function downloadResource(
   url: string,
   onProgress?: ProgressCallback,
   signal?: AbortSignal,

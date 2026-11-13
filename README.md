@@ -27,6 +27,9 @@ temas claro y oscuro. Versión de desarrollo: **0.1.0**.
 - Explorar el modelo por capas, medir distancias y estudiar el sol por fecha y ubicación.
 - Guardar vistas con miniaturas y exportar PNG, views.json, scripts de Blender o un GLB con cámaras y luces.
 - Dividir modelos grandes en teselas e instanciar bloques compatibles para reducir draw calls.
+- Ajustar la altura de cada capa desde el visor, resaltar capas y medir con lupa.
+- Capturar vistas en HD y 4K y generar imágenes arquitectónicas con IA a partir de ellas
+  ([docs/VISTAS_E_IMAGENES.md](docs/VISTAS_E_IMAGENES.md)).
 
 ## Inicio rápido
 
@@ -149,9 +152,18 @@ uv run extrude convert plano.dwg -c proyecto.yaml -o ../out/proyecto
 uv run extrude convert plano.dxf -c proyecto.yaml -o ../out/ciudad --tiles 500 --compress meshopt
 ```
 
-Genera `model.glb` (o `tiles/*.glb` + `manifest.json`), `report.md` y `report.json`. El informe
-lista todo lo leído, convertido, ignorado, reparado o descartado, con su capa. Formato del GLB:
-[docs/EXPORT_FORMATS.md](docs/EXPORT_FORMATS.md).
+Genera `model.glb` (o `tiles/*.glb` + `manifest.json`), `report.md`, `report.json` y
+`objects.json`. El informe lista todo lo leído, convertido, ignorado, reparado o descartado, con
+su capa. `objects.json` es el catálogo de objetos: un ID persistente y una etiqueta (E-001…) por
+edificio, sus superficies (fachada, patio, cubierta, zócalo) y la revisión geométrica. Un plan de
+materiales se valida contra él con
+`uv run extrude validate-materials materials.json --objects ../out/proyecto/objects.json` y se
+aplica, sin volver a convertir, con
+`uv run extrude materialize ../out/proyecto/model.glb materials.json`: el resultado
+(`model.materialized.glb`) lleva materiales PBR y texturas incorporadas, y se abre en el visor o
+en Blender. `uv run extrude library` lista los materiales disponibles.
+Formatos: [docs/EXPORT_FORMATS.md](docs/EXPORT_FORMATS.md); requisitos de materialidad:
+[docs/REQUISITOS_MATERIALIDAD_IA.md](docs/REQUISITOS_MATERIALIDAD_IA.md).
 
 Con las muestras: `just convert-samples` y `just validate out/block_2d/model.glb`.
 
@@ -225,6 +237,32 @@ just dev                # http://localhost:5173
 - barra de progreso real: descarga en %, carga de geometría y sombras.
 
 Al terminar, el hub se desvanece y aparece el espacio de trabajo. *Abrir* (barra superior) lo vuelve a mostrar.
+
+**Materiales** (pestaña de la barra izquierda, necesita `just serve`). Asignación manual por
+edificio y superficie, sin IA:
+- marca objetos en la lista (E-001…, filtrable) o pulsa uno en la vista y usa *+ Pulsado en 3D*;
+- elige superficie (solo las que tienen esos objetos: fachada, patio, cubierta, zócalo…),
+  material de la biblioteca, color, rugosidad, tamaño de pieza en metros y giro;
+- *Añadir asignación*: una asignación nueva prevalece sobre las anteriores para esos mismos
+  objeto y superficie, así que el plan nunca tiene conflictos. *Deshacer*/*Rehacer* (Ctrl+Z/Y);
+- *Previsualizar* materializa en el servidor y recarga el modelo sin mover cámara, sol ni capas;
+  *Descartar* vuelve al último estado confirmado; *Confirmar* guarda una revisión nueva
+  (`mat-001`, `mat-002`…) y ofrece el GLB materializado y `materials.json` para descargar;
+- *Importar/Exportar plan* lee o guarda `materials.json`. El borrador se recuerda en el
+  navegador para cada revisión geométrica.
+
+Funciona con modelos convertidos desde el visor y con GLB base abiertos desde disco (se suben a
+`extrude serve` al previsualizar). Un GLB ya materializado no se vuelve a editar: abre su base.
+
+*Editar proyecto con IA* (opcional): escribe libremente qué quieres cambiar («sube E-001 dos
+plantas, mueve E-007 10 m al sur, ladrillo rojo en todos salvo E-002, una vista al atardecer»).
+Una única llamada a Claude u OpenAI (configurados en `extrude serve` con `uv sync --extra ai` y sus
+claves) devuelve la interpretación y un plan de operaciones reales —materiales, altura, mover,
+girar, duplicar, vistas y sol—, con dudas, conflictos y lo que aún no se puede hacer (balcones,
+ventanas, vegetación…). Se previsualiza, se confirma como una revisión del proyecto y se deshace o
+rehace sin volver a consultar. `extrude serve --ai-simulated` añade un proveedor local sin coste.
+Herramientas, límites y privacidad: [docs/EDICION_IA.md](docs/EDICION_IA.md).
+Al aplicar materiales se quitan los colores de capa para no teñir las texturas.
 
 | Zona | Contenido |
 |---|---|
@@ -304,6 +342,30 @@ Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para el flujo de cambios.
 | `POST /api/convert?name=plano.dxf&async=1` | Aceptar un trabajo y devolver su ruta de estado |
 | `GET /api/jobs/<id>/status` | Fase, progreso y resultado o error |
 | `GET /api/jobs/<id>/…` | Modelo, informes, YAML, manifest y teselas |
+| `GET /api/projects` | Proyectos convertidos que conserva el servidor y que el usuario puede ver |
+| `GET /api/jobs/<id>/result` | Recuperar el resultado de conversión para reabrir el proyecto |
+| `GET /api/jobs/<id>/layers-config` | Configuración y ajustes de altura por capa; indica si se puede reconvertir |
+| `GET /api/jobs/<id>/review` | Revisar apoyo, terreno, capas pendientes y disponibilidad de recuperación |
+| `POST /api/jobs/<id>/reconvert` | Aplicar ajustes al YAML y reconvertir el plano guardado; devuelve 202 y ruta de estado |
+| `POST /api/jobs/<id>/restore` | Recuperar el resultado anterior a la última reconversión, incluido su YAML |
+| `GET /api/library`, `POST /api/models`, `POST /api/jobs/<id>/materials` | Materiales (Fase 2) |
+| `GET /api/tools`, `GET /api/ai/providers`, `POST /api/jobs/<id>/ai/{context,propose,cache/clear}`, `POST /api/jobs/<id>/edit/apply`, `GET /api/jobs/<id>/project`, `POST /api/jobs/<id>/project/{undo,redo}` | Edición con IA y revisiones ([docs/EDICION_IA.md](docs/EDICION_IA.md)) |
+| `GET /api/images/providers` | Proveedores de imágenes disponibles, límites y asistencia de prompt; sin claves |
+| `POST /api/images/plan` | Consultar la resolución que se pediría; sin generar ni consumir una llamada de imagen |
+| `POST /api/images/suggest` | Proponer una redacción del prompt con Claude; no genera imágenes |
+| `POST /api/images/generate` | Iniciar una generación asíncrona; devuelve 202 y el trabajo |
+| `GET /api/images/jobs/<id>` | Consultar el estado y resultado de la generación |
+| `GET /api/images/jobs/<id>/file` | Descargar la imagen generada |
+| `POST /api/images/jobs/<id>/cancel` | Dejar de esperar y descartar el resultado; el proveedor puede continuar y facturar |
+
+Las rutas de reconversión e imágenes reciben JSON (`Content-Type: application/json`).
+La reconversión acepta `heights: {capa: metros o null}` y/o
+`adjust: {capa: {height, support, kind, z_height}}`; los campos son opcionales y `null`
+quita el ajuste correspondiente. `support` admite `"auto"` y `z_height`, `"ignore"`
+(dejar de interpretar Z como altura). El progreso se consulta en la ruta `/status` devuelta.
+`restore` recibe `{}` y devuelve el resultado recuperado; no es el mismo historial que
+`project/undo` y `project/redo`. Consulta [apoyo y cotas](docs/APOYO_Y_COTAS.md) y
+[alturas e imágenes](docs/VISTAS_E_IMAGENES.md) para los flujos y sus limitaciones.
 
 El cliente envía `Content-Type: application/octet-stream` y, opcionalmente,
 `X-Extrude-Config` con el YAML en Base64 UTF-8. `tiles` y `compress` son parámetros opcionales.
@@ -359,6 +421,7 @@ docs/       Arquitectura, configuración y formatos de exportación
 
 ## Documentación
 
+- [Guía de uso completa](docs/GUIA_DE_USO.md)
 - [Configuración por capa y fuentes de altura](docs/CONFIG.md)
 - [Formatos de exportación y coordenadas](docs/EXPORT_FORMATS.md)
 - [Arquitectura y decisiones técnicas](docs/ARCHITECTURE.md)

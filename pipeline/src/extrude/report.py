@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from extrude import __version__
-from extrude.heights import HeightOrigin
+from extrude.build import HIGH_FOUNDATION_M
+from extrude.classification import describe_pending, layer_evidence
+from extrude.heights import HeightOrigin, confidence
 
 if TYPE_CHECKING:
     from extrude.convert import ConvertOptions, ConvertResult
@@ -69,6 +71,24 @@ def build_report(result: ConvertResult, source: Path, options: ConvertOptions) -
             "max_foundation_height_m": max(
                 (o.foundation_height for o in geometry.objects), default=0.0
             ),
+            "high_foundations": sum(
+                o.foundation_height > HIGH_FOUNDATION_M for o in geometry.objects
+            ),
+            # Procedencia: de dónde sale la base de cada objeto y qué acredita su altura
+            "base_mode": _base_mode(geometry.rule),
+            "base_origins": dict(stats.base_origins),
+            "height_confidence": dict(
+                Counter(
+                    confidence(o.height_origin)
+                    for o in geometry.objects
+                    # Solo edificios: el grosor fijo de un vial no es una «altura acreditada»
+                    if geometry.rule.kind.value == "building"
+                    and o.height_origin is not None
+                    and o.height
+                )
+            ),
+            "elevation_rejected": stats.elevation_rejected,
+            "z_unexplained": stats.z_unexplained,
         }
     for status, group in (
         ("ignored", build.ignored),
@@ -77,6 +97,19 @@ def build_report(result: ConvertResult, source: Path, options: ConvertOptions) -
     ):
         for name, counts in group.items():
             layers[name] = {"status": status, "features": dict(counts)}
+    # Capas no convertidas con geometría convertible: pendientes de revisión, salvo que su
+    # regla diga que ya se revisaron (reviewed: true)
+    evidence = layer_evidence(read)
+    pending: list[dict[str, Any]] = []
+    for name, info in layers.items():
+        found = evidence.get(name)
+        if info["status"] not in ("ignored", "unruled") or found is None:
+            continue
+        rule = options.config.rule_for(name)
+        info["evidence"] = found.as_dict()
+        info["pending_review"] = bool(found.convertible) and not (rule and rule.reviewed)
+        if info["pending_review"]:
+            pending.append(describe_pending(name, found))
     # Capas cuyas entidades no generaron ningún elemento (todas no soportadas/omitidas/fallidas)
     read_by_layer: dict[str, Counter[str]] = {}
     for (name, dxftype), n in read.read.items():
@@ -104,6 +137,8 @@ def build_report(result: ConvertResult, source: Path, options: ConvertOptions) -
         "units_assumed": read.units_assumed,
         "origin_offset": list(result.origin),
         "crs": options.config.crs,
+        "geometry_revision": result.geometry_revision,
+        "catalog": {"file": "objects.json", "objects": len(result.catalog.get("objects", []))},
         "entities": {
             "read_by_type": dict(by_type.most_common()),
             "unsupported": _rows(read.unsupported),
@@ -111,6 +146,9 @@ def build_report(result: ConvertResult, source: Path, options: ConvertOptions) -
             "failed": _rows(read.failed),
         },
         "layers": dict(sorted(layers.items())),
+        "terrain": build.terrain,
+        "pending_layers": sorted(pending, key=lambda p: p["name"]),
+        "summary": _summary(layers, pending),
         "output": {
             "files": outputs,
             "total_size_bytes": sum(o["size_bytes"] for o in outputs),
@@ -124,9 +162,59 @@ def build_report(result: ConvertResult, source: Path, options: ConvertOptions) -
     }
 
 
+def _base_mode(rule: Any) -> str:
+    if rule.base_auto:
+        return "auto"
+    if rule.base_from_terrain:
+        return "terrain"
+    if rule.base_from_elevation:
+        return "elevation"
+    return "fixed"
+
+
+def _summary(layers: dict[str, dict[str, Any]], pending: list[dict[str, Any]]) -> dict[str, Any]:
+    """Totales del modelo. Los contadores de apoyo solo hablan de lo CONVERTIDO: por eso van
+    junto a lo descartado, lo ignorado y lo pendiente de interpretar."""
+    converted = [i for i in layers.values() if i["status"] == "converted"]
+    ground: Counter[str] = Counter()
+    heights: Counter[str] = Counter()
+    for info in converted:
+        ground.update(info.get("ground_check") or {})
+        ground["extrapolated"] += (info.get("terrain_coverage") or {}).get("extrapolated", 0)
+        heights.update(info.get("height_confidence") or {})
+    return {
+        "converted_layers": len(converted),
+        "converted_objects": sum(i.get("objects", 0) for i in converted),
+        "dropped_objects": sum(i.get("dropped_without_height", 0) for i in converted),
+        "ignored_layers": sum(i["status"] in ("ignored", "unruled") for i in layers.values()),
+        "pending_layers": len(pending),
+        "pending_elements": sum(
+            p["evidence"]["closed_outlines"] + p["evidence"]["hatches"] + p["evidence"]["meshes"]
+            for p in pending
+        ),
+        "verified_heights": heights.get("verified", 0),
+        "inferred_heights": heights.get("inferred", 0),
+        "provisional_heights": heights.get("provisional", 0),
+        "foundations": sum(i.get("terrain_foundations", 0) for i in converted),
+        "high_foundations": sum(i.get("high_foundations", 0) for i in converted),
+        "max_foundation_height_m": max(
+            (i.get("max_foundation_height_m", 0.0) for i in converted), default=0.0
+        ),
+        "ground": dict(ground),
+    }
+
+
 def _warnings(result: ConvertResult, layers: dict[str, dict[str, Any]]) -> list[str]:
     read, build = result.read, result.build
     warnings = list(read.warnings) + list(build.warnings)
+    pending = sorted(n for n, i in layers.items() if i.get("pending_review"))
+    if pending:
+        warnings.append(
+            f"{len(pending)} capas no se han convertido y contienen geometría convertible "
+            f"(contornos cerrados, sombreados o mallas): {', '.join(pending)}. Están pendientes "
+            "de revisión: los contadores de apoyo no las incluyen. Decide su tipo en el visor "
+            "(pestaña Capas) o en el YAML."
+        )
     if read.unsupported:
         detail = ", ".join(
             f"{t}×{n} en {layer}" for (layer, t), n in sorted(read.unsupported.items())
@@ -166,6 +254,12 @@ def _warnings(result: ConvertResult, layers: dict[str, dict[str, Any]]) -> list[
                 "Es una aproximación geométrica: revisa las cotas de proyecto y las alturas "
                 "asignadas, especialmente en laderas fuertes."
             )
+        if info.get("high_foundations"):
+            warnings.append(
+                f"Capa {name}: {info['high_foundations']} edificios necesitan un zócalo de más "
+                f"de {HIGH_FOUNDATION_M:g} m para tocar el terreno. El contacto queda resuelto, "
+                "pero la implantación (plataformas, accesos, cota de planta) debe revisarse."
+            )
         if partially_buried:
             warnings.append(
                 f"Capa {name}: {partially_buried} sólidos parcialmente enterrados; el terreno "
@@ -175,7 +269,7 @@ def _warnings(result: ConvertResult, layers: dict[str, dict[str, Any]]) -> list[
         if info.get("kind") == "building" and defaulted:
             warnings.append(
                 f"Capa {name}: {defaulted} edificios usan default_height (no se encontró "
-                "altura en el dibujo)."
+                "altura en el dibujo). Es una altura PROVISIONAL, no un dato del plano."
             )
     if result.read.units_assumed:
         warnings.append("Unidades supuestas (metros): verifica la escala del modelo.")
@@ -199,6 +293,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- DXF: {report['dxf_version']} · unidades: {report['units']}"
         + (" (supuestas)" if report["units_assumed"] else ""),
         f"- Desplazamiento de origen (m, ejes DWG): {report['origin_offset']}",
+        f"- Revisión geométrica: `{report['geometry_revision']}` · "
+        f"{report['catalog']['objects']:,} objetos en {report['catalog']['file']}",
         f"- Triángulos: {out['triangles']:,} · draw calls: {out['draw_calls']} · "
         f"tamaño: {_mb(out['total_size_bytes'])}"
         + (f" · compresión: {out['compression']}" if out["compression"] else ""),
@@ -207,6 +303,50 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
     ]
     lines += [f"- {w}" for w in report["warnings"]] or ["- Ninguno."]
+
+    summary = report.get("summary") or {}
+    if summary:
+        ground = summary.get("ground", {})
+        terrain = report.get("terrain") or {}
+        state = {"valid": "válido", "invalid": "no utilizable", "absent": "no hay"}.get(
+            str(terrain.get("status")), "—"
+        )
+        lines += [
+            "",
+            "## Resumen de calidad",
+            "",
+            f"- Objetos convertidos: {summary['converted_objects']:,} en "
+            f"{summary['converted_layers']} capas.",
+            f"- Objetos descartados por no tener altura: {summary['dropped_objects']:,}.",
+            f"- Capas ignoradas: {summary['ignored_layers']}, de ellas "
+            f"**{summary['pending_layers']} pendientes de revisión** "
+            f"({summary['pending_elements']:,} elementos sin interpretar).",
+            f"- Alturas: {summary['verified_heights']:,} acreditadas por el plano o la "
+            f"configuración, {summary['inferred_heights']:,} inferidas de una cota, "
+            f"**{summary['provisional_heights']:,} provisionales**.",
+            f"- Terreno de apoyo: {state}"
+            + (f" ({terrain['reason']})" if terrain.get("reason") else "")
+            + ".",
+            f"- Apoyo de lo convertido: {ground.get('floating', 0)} flotan, "
+            f"{ground.get('partial_gap', 0)} con contacto parcial, {ground.get('buried', 0)} "
+            f"enterrados, {ground.get('partially_buried', 0)} parcialmente enterrados, "
+            f"{ground.get('intersecting', 0)} cortan la ladera, {ground.get('extrapolated', 0)} "
+            f"fuera del terreno, {ground.get('unverified', 0)} sin verificar "
+            f"(de {ground.get('checked', 0)} comprobados).",
+            f"- Zócalos: {summary['foundations']}, de ellos {summary['high_foundations']} de "
+            f"más de {HIGH_FOUNDATION_M:g} m (máximo {summary['max_foundation_height_m']:.2f} m).",
+        ]
+        if report.get("pending_layers"):
+            lines += ["", "### Capas pendientes de revisión", ""]
+            lines += [
+                f"- {p['name']}: {p['summary']}"
+                + (
+                    f" (por el nombre podría ser «{p['suggested_kind']}»)"
+                    if p["suggested_kind"]
+                    else ""
+                )
+                for p in report["pending_layers"]
+            ]
 
     lines += ["", "## Entidades leídas por tipo", "", "| Tipo | Nº |", "|---|---:|"]
     lines += [f"| {t} | {n:,} |" for t, n in report["entities"]["read_by_type"].items()]

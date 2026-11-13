@@ -6,8 +6,9 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial import Delaunay, QhullError
 
-from extrude.extrusion import MeshData, drop_degenerate
+from extrude.extrusion import MeshData, drop_degenerate, labeled
 from extrude.model import BBox, MeshFeature
+from extrude.surfaces import Surface
 
 MIN_TIN_POINTS = 3
 
@@ -18,7 +19,7 @@ def mesh_from_feature(feature: MeshFeature, scale: float) -> tuple[MeshData, int
         (face[0], face[i], face[i + 1]) for face in feature.faces for i in range(1, len(face) - 1)
     ]
     faces = np.array(triangles, dtype=np.int64).reshape(-1, 3)
-    return drop_degenerate(MeshData(feature.vertices * scale, faces))
+    return drop_degenerate(labeled(MeshData(feature.vertices * scale, faces), Surface.GENERIC))
 
 
 def tin(points: NDArray[np.float64], tolerance: float) -> MeshData | None:
@@ -35,11 +36,13 @@ def tin(points: NDArray[np.float64], tolerance: float) -> MeshData | None:
     a, b, c = (pts[faces[:, i], :2] for i in range(3))
     signed = (b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])
     faces[signed < 0] = faces[signed < 0][:, ::-1]
-    return MeshData(pts, faces)
+    return labeled(MeshData(pts, faces), Surface.GROUND)
 
 
 def base_plane(bbox: BBox, scale: float, z: float) -> MeshData:
     (x0, y0, _), (x1, y1, _) = bbox.min, bbox.max
     corners = np.array([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], dtype=np.float64) * scale
     vertices = np.column_stack([corners, np.full(4, z)])
-    return MeshData(vertices, np.array([(0, 1, 2), (0, 2, 3)], dtype=np.int64))
+    return labeled(
+        MeshData(vertices, np.array([(0, 1, 2), (0, 2, 3)], dtype=np.int64)), Surface.GROUND
+    )

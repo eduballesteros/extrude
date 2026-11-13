@@ -46,7 +46,7 @@ describe('misplacedLayers con ground_check del pipeline', () => {
     expect(found.map((l) => l.layer)).toEqual(['-EDIFICIOS', '3_VEGETACIÓN']);
     const message = misplacedMessage(found);
     expect(message).toContain('-EDIFICIOS (53 flotan, 0 enterrados de 616)');
-    expect(message).toContain('base_from_terrain: true');
+    expect(message).toContain('Revisión del proyecto');
   });
 
   it('modelo corregido: sin aviso, aunque la base esté en cota 0 (heurística no se usa)', () => {
@@ -54,10 +54,10 @@ describe('misplacedLayers con ground_check del pipeline', () => {
     expect(misplacedLayers(root)).toEqual([]);
   });
 
-  it('ignora ruido por debajo del 1 % de los sólidos', () => {
-    const noise = { checked: 1301, floating: 3, buried: 0 };
-    const root = scene(layer('contours', 'terrain', -61), layer('A', 'vegetation', -60, noise));
-    expect(misplacedLayers(root)).toEqual([]);
+  it('avisa aunque sean pocos: mismo criterio que el informe del servidor', () => {
+    const few = { checked: 1301, floating: 3, buried: 0 };
+    const root = scene(layer('contours', 'terrain', -61), layer('A', 'vegetation', -60, few));
+    expect(misplacedLayers(root)).toEqual([{ layer: 'A', check: few }]);
   });
 
   it('teselas: la misma capa en varias teselas cuenta una vez', () => {

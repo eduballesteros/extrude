@@ -1,0 +1,40 @@
+name: Deployment artifacts
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['deploy/**', '.dockerignore', 'pipeline/**', 'tools/**', 'viewer/**']
+permissions:
+  contents: read
+jobs:
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Prepare non-production configuration
+        run: |
+          cp deploy/.env.example deploy/.env
+          mkdir -p deploy/private
+          printf '{}\n' > deploy/private/providers.json
+          sudo chown 10001:10001 deploy/private/providers.json
+          sudo chmod 400 deploy/private/providers.json
+      - run: sh deploy/ops.sh build
+      - run: sh deploy/ops.sh check
+      - name: Initialize test account and check runtime
+        working-directory: deploy
+        run: |
+          python3 -c 'import secrets; print(secrets.token_urlsafe(32))' | docker compose run --rm -T --no-deps api users add ci --users /data/accounts/users.json --password-stdin
+          docker compose up -d --wait api
+          docker compose exec -T api node --version
+          docker compose exec -T api python /opt/extrude/runtime.py health
+          docker compose exec -T api python -c 'import json,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:8765/api/auth/me")); assert d == {"mode":"shared","user":None}'
+      - name: Collect status
+        if: always()
+        working-directory: deploy
+        run: docker compose ps -a && docker compose logs --tail=100 api
+      - name: Stop test containers
+        if: always()
+        working-directory: deploy
+        run: docker compose down

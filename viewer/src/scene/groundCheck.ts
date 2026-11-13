@@ -2,8 +2,6 @@ import { Box3, type Object3D } from 'three';
 
 /** Capas extruidas que deberían apoyarse en el terreno. */
 const EXTRUDED_KINDS = new Set(['building', 'road', 'water', 'vegetation']);
-/** Proporción de sólidos mal apoyados de una capa a partir de la cual se avisa. */
-const MIN_FRACTION = 0.01;
 /** Una base "en cota 0" (GLB antiguos sin ground_check). */
 const ZERO_EPS_M = 0.01;
 const TERRAIN_MARGIN_M = 1;
@@ -69,8 +67,8 @@ export function misplacedLayers(root: Object3D): MisplacedLayer[] {
     return checks
       .filter(({ check }) => {
         if (!check) return false;
-        const bad = check.floating + check.buried;
-        return bad > 0 && bad >= MIN_FRACTION * check.checked;
+        // Mismo criterio que el informe del servidor: basta un sólido mal apoyado
+        return check.floating + check.buried > 0;
       })
       .map(({ name, check }) => ({ layer: name, check }));
   }
@@ -93,6 +91,6 @@ export function misplacedMessage(layers: MisplacedLayer[]): string {
     .join(', ');
   return (
     `Algunos sólidos pueden estar flotando sobre el terreno o enterrados: ${detail}. ` +
-    'Añade base_from_terrain: true en las capas afectadas del YAML y regenera el modelo.'
+    'Abre la pestaña Capas → «Revisión del proyecto» para apoyarlos en el terreno.'
   );
 }

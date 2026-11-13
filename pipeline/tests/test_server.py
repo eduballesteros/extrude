@@ -250,13 +250,17 @@ def test_tiles_with_insertion_points_outside_block_are_downloadable(
 
 
 @pytest.mark.parametrize("indices", ["-2_0", "0_-2", "-2_-2", "1000000_-1000000"])
-def test_job_store_serves_signed_pipeline_tile_indices(tmp_path: Path, indices: str) -> None:
+@pytest.mark.parametrize("revision", ["", ".rev-001", ".rev-1000"])
+def test_job_store_serves_signed_pipeline_tile_indices(
+    tmp_path: Path, indices: str, revision: str
+) -> None:
     store = JobStore(tmp_path)
     job_id, job = store.create()
-    path = job / "out" / "tiles" / f"tile_{indices}.glb"
+    name = f"tile_{indices}{revision}.glb"
+    path = job / "out" / "tiles" / name
     path.parent.mkdir(parents=True)
     path.write_bytes(b"glTF")
-    assert store.file(job_id, f"tiles/tile_{indices}.glb") == (path.resolve(), "model/gltf-binary")
+    assert store.file(job_id, f"tiles/{name}") == (path.resolve(), "model/gltf-binary")
 
 
 @pytest.mark.parametrize("indices", ["--2_0", "+2_0", "2.0_0", "٢_0", "2_-", "2_0_extra"])

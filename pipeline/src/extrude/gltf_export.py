@@ -6,7 +6,14 @@ Convenciones:
 - Un nodo por capa con una malla fusionada (una primitiva por material) y nodos hijos con
   `EXT_mesh_gpu_instancing` para bloques repetidos.
 - Atributo de vértice `_OBJECT_ID` (float): índice del objeto dentro de la capa; los metadatos de
-  cada objeto van en `node.extras.objects` como arrays paralelos.
+  cada objeto van en `node.extras.objects` como arrays paralelos. El índice es local al GLB; la
+  identidad persistente es `extras.objects.id` (ver catalog.py y objects.json).
+- `_SURFACE` (float): superficie semántica (surfaces.Surface) de cada vértice; un vértice nunca
+  se comparte entre superficies (si hiciera falta, la malla se desindexa).
+- `TEXCOORD_0`: UV en **metros** (RG-03/RG-04). Paredes: distancia sobre el contorno y cota;
+  tapas y suelos: proyección en planta (x, y del dibujo, recentrados); mallas 3D de origen: por
+  triángulo, en planta o vertical según su normal. En prototipos instanciados, metros locales del
+  bloque. `extrude materialize` convierte estas UV a la escala de cada material.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from extrude import __version__
 from extrude.build import LineObject, SceneObject
 from extrude.config import Kind, LayerRule, Material
 from extrude.extrusion import MeshData, box_corners
+from extrude.heights import confidence
 from extrude.instancing import InstanceGroup, Matrix, decompose_trs, transform
 
 AXIS_TRANSFORM_DOC = "(x, y, z)_dwg -> (x, z, -y)_gltf"
@@ -63,6 +71,7 @@ class SceneInfo:
     # Centro de la escena en WGS84 (grados), si el CRS se puede reproyectar: sitúa el sol
     center_lat: float | None = None
     center_lon: float | None = None
+    geometry_revision: str | None = None  # catalog.geometry_revision (objects.json)
 
 
 @dataclass(frozen=True)
@@ -101,10 +110,52 @@ def vertex_normals(mesh: MeshData) -> NDArray[np.float64]:
     return normals
 
 
+def vertex_surfaces(mesh: MeshData) -> tuple[MeshData, NDArray[np.float32]]:
+    """Superficie por vértice; desindexa la malla si algún vértice está en dos superficies."""
+    faces, surfaces = mesh.faces, mesh.face_surfaces
+    per_vertex = np.zeros(len(mesh.vertices), dtype=np.int16)
+    for k in range(3):
+        per_vertex[faces[:, k]] = surfaces
+    if len(faces) and (per_vertex[faces] != surfaces[:, None]).any():
+        mesh = unweld(mesh)
+        per_vertex = np.repeat(mesh.face_surfaces, 3).astype(np.int16)
+    return mesh, per_vertex.astype(np.float32)
+
+
+def metric_uvs(mesh: MeshData, origin_xy: Sequence[float]) -> NDArray[np.float32]:
+    """UV en metros (ver docstring del módulo). `origin_xy` se resta antes de pasar a float32."""
+    uvs = mesh.vertex_uvs.copy()
+    missing = ~np.isfinite(uvs).all(axis=1)
+    if missing.any():
+        xy = mesh.vertices[:, :2] - np.asarray(origin_xy, dtype=np.float64)
+        uvs[missing] = xy[missing]
+        # Mallas desindexadas (3DFACE…): las caras casi verticales se proyectan sobre su plano
+        unwelded = len(mesh.faces) * 3 == len(mesh.vertices) and np.array_equal(
+            mesh.faces.reshape(-1), np.arange(len(mesh.vertices))
+        )
+        if unwelded and len(mesh.faces):
+            v = mesh.vertices
+            f = mesh.faces
+            n = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])
+            horizontal = np.linalg.norm(n[:, :2], axis=1)
+            vertical = horizontal > np.abs(n[:, 2])
+            tangent = np.zeros((len(f), 2))
+            safe = horizontal > 0
+            tangent[safe] = np.column_stack([-n[safe, 1], n[safe, 0]]) / horizontal[safe, None]
+            per_vertex = np.repeat(vertical, 3) & missing
+            t = np.repeat(tangent, 3, axis=0)
+            uvs[per_vertex, 0] = (xy[per_vertex] * t[per_vertex]).sum(axis=1)
+            uvs[per_vertex, 1] = v[per_vertex, 2]
+    return uvs.astype(np.float32)
+
+
 def unweld(mesh: MeshData) -> MeshData:
     """Un vértice por esquina de triángulo: normales planas en mallas de origen 3D."""
     vertices = mesh.vertices[mesh.faces.reshape(-1)]
-    return MeshData(vertices, np.arange(len(vertices), dtype=np.int64).reshape(-1, 3))
+    order = mesh.faces.reshape(-1)
+    faces = np.arange(len(vertices), dtype=np.int64).reshape(-1, 3)
+    uvs = mesh.uvs[order] if mesh.uvs is not None else None
+    return MeshData(vertices, faces, mesh.surfaces, uvs)
 
 
 class _Builder:
@@ -238,6 +289,8 @@ def build_glb(layers: Sequence[ExportLayer], info: SceneInfo) -> tuple[bytes, Gl
         extras: dict[str, Any] = {
             "layer": layer.name,
             "kind": layer.rule.kind.value,
+            # Altura de planta configurada: «sube dos plantas» no inventa la altura
+            "floor_height": layer.rule.floor_height if layer.rule.kind is Kind.BUILDING else None,
             "visible": layer.rule.visible,
             "source_entities": layer.source_entities,
         }
@@ -287,6 +340,7 @@ def build_glb(layers: Sequence[ExportLayer], info: SceneInfo) -> tuple[bytes, Gl
         "center_lon": info.center_lon,
         "axis_transform": AXIS_TRANSFORM_DOC,
         "bbox": bbox,
+        "geometry_revision": info.geometry_revision,
     }
     data = builder.encode(scene_extras)
     stats = GlbStats(len(data), builder.triangles, builder.draw_calls, instanced_blocks, instances)
@@ -299,13 +353,16 @@ Bounds = tuple[NDArray[np.float32], NDArray[np.float32]]
 def _merged_primitive(
     builder: _Builder, objects: Sequence[SceneObject], origin: Sequence[float], material: int
 ) -> tuple[dict[str, Any], int, Bounds]:
-    positions, normals, ids, faces = [], [], [], []
+    positions, normals, ids, faces, surfaces, uvs = [], [], [], [], [], []
     offset = 0
     for index, obj in enumerate(objects):
         mesh = unweld(obj.mesh) if obj.hard_edges else obj.mesh
+        mesh, surface = vertex_surfaces(mesh)
         positions.append(to_gltf_points(mesh.vertices, origin))
         normals.append(to_gltf_vectors(vertex_normals(mesh)))
         ids.append(np.full(len(mesh.vertices), index, dtype=np.float32))
+        surfaces.append(surface)
+        uvs.append(metric_uvs(mesh, origin[:2]))
         faces.append(mesh.faces + offset)
         offset += len(mesh.vertices)
     pos = np.vstack(positions)
@@ -314,7 +371,9 @@ def _merged_primitive(
         "attributes": {
             "POSITION": builder.accessor(pos, FLOAT, "VEC3", bounds=True),
             "NORMAL": builder.accessor(np.vstack(normals), FLOAT, "VEC3"),
+            "TEXCOORD_0": builder.accessor(np.vstack(uvs), FLOAT, "VEC2"),
             "_OBJECT_ID": builder.accessor(np.concatenate(ids), FLOAT, "SCALAR"),
+            "_SURFACE": builder.accessor(np.concatenate(surfaces), FLOAT, "SCALAR"),
         },
         "indices": builder.indices(tri, len(pos)),
         "material": material,
@@ -357,11 +416,20 @@ def _instanced_node(
     layer: str,
 ) -> tuple[dict[str, Any], int, Bounds]:
     proto = unweld(group.prototype) if group.hard_edges else group.prototype
+    proto, surfaces = vertex_surfaces(proto)  # conservan el orden de las caras
+    parts = np.zeros(len(proto.vertices), dtype=np.float32)
+    if len(group.face_parts) == len(proto.faces):
+        for k in range(3):
+            parts[proto.faces[:, k]] = group.face_parts
     local = to_gltf_points(proto.vertices, (0.0, 0.0, 0.0))
     prim = {
         "attributes": {
             "POSITION": builder.accessor(local, FLOAT, "VEC3", bounds=True),
             "NORMAL": builder.accessor(to_gltf_vectors(vertex_normals(proto)), FLOAT, "VEC3"),
+            "TEXCOORD_0": builder.accessor(metric_uvs(proto, (0.0, 0.0)), FLOAT, "VEC2"),
+            # Índice del objeto dentro de cada copia (extras.object_ids[instancia][parte])
+            "_OBJECT_ID": builder.accessor(parts, FLOAT, "SCALAR"),
+            "_SURFACE": builder.accessor(surfaces, FLOAT, "SCALAR"),
         },
         "indices": builder.indices(proto.faces, len(local)),
         "material": material,
@@ -406,6 +474,7 @@ def _instanced_node(
             "block": group.block,
             "instances": len(group.matrices),
             "objects_per_instance": group.objects_per_instance,
+            "object_ids": [list(ids) for ids in group.object_ids],
         },
     }
     triangles = len(proto.faces) * len(group.matrices)
@@ -417,6 +486,8 @@ def _object_table(objects: Sequence[SceneObject], rule: LayerRule) -> dict[str, 
     ase = cota de la base en metros (ejes DWG, sin recentrar en Z)."""
     building = rule.kind is Kind.BUILDING
     return {
+        "id": [o.object_id for o in objects],
+        "label": [o.label for o in objects],
         "height": [None if o.height is None else round(o.height, 3) for o in objects],
         "floors": [
             round(o.height / rule.floor_height) if building and o.height is not None else None
@@ -432,6 +503,10 @@ def _object_table(objects: Sequence[SceneObject], rule: LayerRule) -> dict[str, 
         ],
         "foundation_height": [round(o.foundation_height, 3) for o in objects],
         "height_origin": [o.height_origin.value if o.height_origin else None for o in objects],
+        "height_confidence": [
+            confidence(o.height_origin) if o.height_origin else None for o in objects
+        ],
+        "base_origin": [o.base_origin for o in objects],
         "source_type": [o.source_type for o in objects],
         "handle": [
             o.handles[0]

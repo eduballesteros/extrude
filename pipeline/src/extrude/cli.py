@@ -14,6 +14,7 @@ from typing import Annotated
 
 import typer
 
+from extrude.catalog import load_catalog
 from extrude.config import load_config
 from extrude.convert import ConvertOptions
 from extrude.convert import convert as run_convert
@@ -22,8 +23,12 @@ from extrude.dxf_reader import read_dxf
 from extrude.errors import ExtrudeError
 from extrude.init_config import draft_config
 from extrude.inspection import format_text, summarize
+from extrude.material_library import DEFAULT_LIBRARY
+from extrude.materiality import load_plan, validate_plan
+from extrude.materialize import materialize as run_materialize
 from extrude.model import LengthUnit
 from extrude.node_tools import Compression
+from extrude.node_tools import compress as compress_glb
 from extrude.server import DEFAULT_MAX_MB, DEFAULT_ORIGINS, DEFAULT_PORT, create_server
 
 app = typer.Typer(
@@ -138,10 +143,62 @@ def serve(
         list[str] | None, typer.Option(help="Origen permitido por CORS (repetible)")
     ] = None,
     jobs_dir: Annotated[Path | None, typer.Option(help="Carpeta de trabajos")] = None,
+    ai_simulated: Annotated[
+        bool,
+        typer.Option(
+            "--ai-simulated",
+            help="Añade un proveedor de IA simulado (reglas locales, sin red ni coste)",
+        ),
+    ] = False,
+    shared: Annotated[
+        bool,
+        typer.Option(
+            "--shared",
+            help="Modo multiusuario: inicio de sesión, permisos por proyecto y límites "
+            "(no cambia --host: sigue siendo local salvo que lo indiques)",
+        ),
+    ] = False,
+    users: Annotated[
+        Path | None, typer.Option(help="Archivo de usuarios (extrude users add) para --shared")
+    ] = None,
 ) -> None:
     """Servidor local para que el visor convierta DWG/DXF arrastrándolos."""
+    from extrude.access import AccessControl, Accounts, SharedMode
+    from extrude.ai_planner import AiService, default_providers
+    from extrude.image_gen import ImageService, default_image_providers
+
     origins = tuple(origin) if origin else DEFAULT_ORIGINS
-    server = create_server(host, port, jobs_dir=jobs_dir, max_mb=max_mb, allowed_origins=origins)
+    ai = AiService(default_providers(simulated=ai_simulated))
+    mode = None
+    with _user_errors():
+        if shared:
+            if users is None:
+                raise ExtrudeError("--shared necesita --users.", "Ej.: --users usuarios.json")
+            root = jobs_dir or Path(tempfile.gettempdir()) / "extrude-jobs"
+            root.mkdir(parents=True, exist_ok=True)
+            mode = SharedMode(Accounts(users), AccessControl(root))
+            jobs_dir = root
+        server = create_server(
+            host,
+            port,
+            jobs_dir=jobs_dir,
+            max_mb=max_mb,
+            allowed_origins=origins,
+            ai=ai,
+            shared=mode,
+            images=ImageService(
+                (jobs_dir or Path(tempfile.gettempdir()) / "extrude-jobs") / "_images",
+                default_image_providers(simulated=ai_simulated),
+            ),
+        )
+    if mode is not None:
+        typer.echo(f"Modo compartido: {len(mode.accounts.names())} usuarios; sesión obligatoria.")
+    for entry in ai.providers_payload()["providers"]:
+        state = "listo" if entry["available"] else f"no disponible: {entry['reason']}"
+        typer.echo(f"IA {entry['name']} ({entry['model'] or 'sin modelo'}): {state}")
+    for entry in default_image_providers(simulated=ai_simulated).values():
+        reason = entry.available()
+        typer.echo(f"Imágenes {entry.name}: {'listo' if reason is None else reason}")
     typer.echo(f"Extrude escuchando en http://{host}:{port} (orígenes: {', '.join(origins)})")
     typer.echo("Abre el visor y arrastra un .dwg o .dxf. Ctrl+C para salir.")
     try:
@@ -150,6 +207,43 @@ def serve(
         typer.echo("Servidor detenido.")
     finally:
         server.server_close()
+
+
+users_app = typer.Typer(help="Usuarios del modo compartido (extrude serve --shared)")
+app.add_typer(users_app, name="users")
+
+
+@users_app.command("add")
+def users_add(
+    name: Annotated[str, typer.Argument(help="Nombre de usuario (minúsculas, dígitos, . _ -)")],
+    users: Annotated[Path, typer.Option(help="Archivo de usuarios")],
+    password_stdin: Annotated[
+        bool, typer.Option("--password-stdin", help="Lee la contraseña de la entrada estándar")
+    ] = False,
+) -> None:
+    """Crea o cambia un usuario (contraseña con scrypt; nunca se guarda en claro)."""
+    import getpass
+
+    from extrude.access import Accounts
+
+    with _user_errors():
+        if password_stdin:
+            password = sys.stdin.readline().rstrip("\r\n")
+        else:
+            password = getpass.getpass("Contraseña: ")
+            if getpass.getpass("Repite la contraseña: ") != password:
+                raise ExtrudeError("Las contraseñas no coinciden.", "Vuelve a intentarlo.")
+        Accounts(users).add(name, password)
+    typer.echo(f"Usuario '{name}' guardado en {users}.")
+
+
+@users_app.command("list")
+def users_list(users: Annotated[Path, typer.Option(help="Archivo de usuarios")]) -> None:
+    """Lista los usuarios (sin datos de contraseña)."""
+    from extrude.access import Accounts
+
+    for name in Accounts(users).names():
+        typer.echo(name)
 
 
 @app.command("init-config")
@@ -173,3 +267,101 @@ def init_config(
         else:
             output.write_text(document, encoding="utf-8")
             typer.echo(f"Borrador escrito en {output}. Revísalo antes de convertir.")
+
+
+@app.command("validate-materials")
+def validate_materials(
+    plan: Annotated[Path, typer.Argument(help="materials.json a validar")],
+    objects: Annotated[
+        Path, typer.Option("--objects", help="objects.json generado por extrude convert")
+    ],
+) -> None:
+    """Valida un plan de materialidad contra el catálogo de objetos y la biblioteca."""
+    _tolerant_console()
+    with _user_errors():
+        parsed = load_plan(plan)
+        try:
+            catalog = load_catalog(objects)
+        except (OSError, ValueError) as exc:
+            raise ExtrudeError(
+                f"No se puede leer el catálogo '{objects}': {exc}.",
+                "Usa el objects.json que acompaña al model.glb de la misma conversión.",
+            ) from exc
+        issues = validate_plan(parsed, catalog)
+    for issue in issues:
+        where = f" (asignación {issue.assignment + 1})" if issue.assignment is not None else ""
+        typer.echo(f"[{issue.code}]{where} {issue.message}", err=True)
+    if issues:
+        raise typer.Exit(1)
+    count = sum(len(a.object_ids) for a in parsed.assignments)
+    typer.echo(
+        f"Plan válido: {len(parsed.assignments)} asignaciones ({count} objeto·superficie), "
+        f"{len(parsed.omissions)} omisiones, revisión {parsed.material_revision}."
+    )
+
+
+@app.command()
+def materialize(
+    model: Annotated[Path, typer.Argument(help="model.glb sin comprimir de extrude convert")],
+    plan: Annotated[Path, typer.Argument(help="materials.json confirmado")],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "-o", "--output", help="GLB de salida (por defecto <modelo>.materialized.glb)"
+        ),
+    ] = None,
+    compress: Annotated[
+        Compression | None, typer.Option(help="Compresión final con gltf-transform")
+    ] = None,
+) -> None:
+    """Aplica un plan de materialidad al GLB: materiales PBR, texturas incorporadas y UV a escala
+    física. No vuelve a convertir el dibujo."""
+    _tolerant_console()
+    target = output or model.with_name(f"{model.stem}.materialized.glb")
+    with _user_errors():
+        if target.resolve() == model.resolve():
+            raise ExtrudeError(
+                "La salida sobrescribiría el GLB base.", "Indica otro nombre con -o."
+            )
+        try:
+            data = model.read_bytes()
+        except OSError as exc:
+            raise ExtrudeError(f"No se puede leer '{model}': {exc}.", "Revisa la ruta.") from exc
+        try:
+            glb, stats = run_materialize(data, load_plan(plan))
+        except ValueError as exc:
+            raise ExtrudeError(
+                f"'{model.name}' no es un GLB válido: {exc}.", "Usa el model.glb de convert."
+            ) from exc
+        # Se escribe a un temporal y se renombra: un fallo no deja un GLB a medias (RN-03)
+        partial = target.with_name(f"{target.name}.partial")
+        partial.write_bytes(glb)
+        if compress is not None:
+            compressed = target.with_name(f"{target.name}.compressed")
+            try:
+                compress_glb(partial, compressed, compress)
+            finally:
+                partial.unlink(missing_ok=True)
+            compressed.replace(target)
+        else:
+            partial.replace(target)
+    typer.echo(
+        f"OK: {stats.materials} materiales · {stats.textures} texturas · "
+        f"{stats.draw_calls} primitivas · {stats.assigned_triangles:,} triángulos asignados · "
+        f"{target.stat().st_size / 1_048_576:.2f} MB → {target}"
+    )
+    if stats.split_instance_nodes:
+        typer.echo(f"  {stats.split_instance_nodes} grupos de instancias separados por material")
+
+
+@app.command()
+def library() -> None:
+    """Lista los materiales de la biblioteca (IDs y versiones para materials.json)."""
+    _tolerant_console()
+    typer.echo(f"Biblioteca {DEFAULT_LIBRARY.version}")
+    for p in DEFAULT_LIBRARY.presets:
+        texture_name = p.pattern or "sin textura"
+        typer.echo(
+            f"  {p.id:<20} v{p.version}  {p.name:<22} {p.color}  rugosidad {p.roughness:.2f}  "
+            f"{p.tile_size_m[0]:g}×{p.tile_size_m[1]:g} m  ({texture_name})"
+        )

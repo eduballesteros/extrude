@@ -1,5 +1,5 @@
-import { afterEach, expect, it, vi } from 'vitest';
-import { loadFromFile, loadFromManifest, loadFromUrl } from './loader';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { downloadResource, loadFromFile, loadFromManifest, loadFromUrl } from './loader';
 
 const triangle = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
 const document = {
@@ -16,6 +16,38 @@ const document = {
 };
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('progreso de descarga', () => {
+  it('informa de fracciones crecientes hasta 1 con Content-Length', async () => {
+    const chunks = [new Uint8Array(40), new Uint8Array(60)];
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const c of chunks) controller.enqueue(c);
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(body, { headers: { 'Content-Length': '100' } })),
+    );
+    const seen: (number | null)[] = [];
+    const { bytes } = await downloadResource('/m.glb', (_, f) => seen.push(f));
+    expect(bytes.byteLength).toBe(100);
+    expect(seen).toEqual([0, 0.4, 1]);
+  });
+
+  it('sin Content-Length la fase es indeterminada', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Uint8Array(10))));
+    const seen: (number | null)[] = [];
+    await downloadResource('/m.glb', (_, f) => seen.push(f));
+    expect(seen.every((f) => f === null)).toBe(true);
+  });
+
+  it('error HTTP con mensaje claro', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })));
+    await expect(downloadResource('/no.glb')).rejects.toThrow('HTTP 404');
+  });
+});
 
 function fetchResources(modelUrl: string, bufferUrl: string, redirected?: string) {
   vi.stubGlobal('location', { href: 'http://viewer.local/' });

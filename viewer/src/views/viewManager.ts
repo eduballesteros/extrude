@@ -1,4 +1,5 @@
 import type { App } from '../app';
+import type { ViewerState } from '../state';
 import { generateBlenderScript, toBlenderData } from '../export/blenderScript';
 import { download, downloadText } from '../export/download';
 import { addCamerasAndLights } from '../export/gltfWithLights';
@@ -19,21 +20,6 @@ import {
 } from './viewState';
 
 export const GENERATOR = 'extrude-viewer 0.1.0';
-
-export interface RenderPreset {
-  label: string;
-  width: number;
-  height: number;
-}
-
-export const RENDER_PRESETS: RenderPreset[] = [
-  { label: 'Full HD 16:9', width: 1920, height: 1080 },
-  { label: '4K UHD 16:9', width: 3840, height: 2160 },
-  { label: 'Panorámica 21:9', width: 3440, height: 1440 },
-  { label: 'A3 apaisado (√2)', width: 4961, height: 3508 },
-  { label: 'Cuadrado', width: 2048, height: 2048 },
-  { label: 'Vertical 4:5', width: 1080, height: 1350 },
-];
 
 type Listener = () => void;
 
@@ -75,16 +61,22 @@ export class ViewManager {
   get model(): ModelInfo | null {
     const model = this.app.model;
     if (!model) return null;
+    // Con materiales confirmados, Blender y views.json apuntan al GLB materializado que entrega
+    // la pestaña Materiales (`<nombre>.materialized.glb`), no al GLB base sin materiales.
+    const materialized = Boolean(model.extras?.material_revision) && !this.app.materialPreview;
     return {
-      file: model.name,
+      file: materialized ? model.name.replace(/(\.glb)?$/i, '.materialized.glb') : model.name,
       originOffset: model.extras?.origin_offset ?? [0, 0, 0],
       crs: model.extras?.crs ?? null,
     };
   }
 
   private async onModel(): Promise<void> {
-    const token = ++this.loadToken;
     const key = this.app.model?.name ?? null;
+    // Recarga del mismo modelo (previsualizar, confirmar o deshacer materiales/ediciones): las
+    // vistas son del proyecto, no de la revisión del GLB; releerlas pisaría cambios recientes.
+    if (key !== null && key === this.modelKey && !this.loading) return;
+    const token = ++this.loadToken;
     this.modelKey = key;
     this.views = [];
     this.activeId = null;
@@ -121,12 +113,7 @@ export class ViewManager {
     const viewportAspect = this.app.viewportAspect;
     state.camera.fovDeg = renderFov(state.camera.fovDeg, viewportAspect, this.aspect);
     state.camera.orthoSize *= frameHeightFraction(viewportAspect, this.aspect);
-    const thumbnail = thumbnailFromCanvas(
-      this.app.renderer,
-      this.app.scene,
-      this.app.nav.camera,
-      this.aspect,
-    );
+    const thumbnail = this.thumbnail();
     const view = createView(
       state,
       name ?? `Vista ${this.views.length + 1}`,
@@ -137,6 +124,49 @@ export class ViewManager {
     this.activeId = view.id;
     this.changed();
     return view;
+  }
+
+  /** Miniatura del encuadre actual, sin ayudas de pantalla (regla, resaltados). */
+  private thumbnail(): string {
+    const restore = this.app.hideHelpers();
+    try {
+      return thumbnailFromCanvas(
+        this.app.renderer,
+        this.app.scene,
+        this.app.nav.camera,
+        this.aspect,
+      );
+    } finally {
+      restore();
+    }
+  }
+
+  /**
+   * Renderiza una vista guardada a `width × height` (su misma proporción) y devuelve el PNG.
+   * Aplica el estado de la vista solo durante el render: la cámara, el sol y las capas del
+   * visor vuelven a como estaban antes de que se pinte el siguiente fotograma.
+   */
+  captureView(id: string, width: number, height: number): Promise<Blob> {
+    this.assertExportable();
+    const view = this.views.find((v) => v.id === id);
+    if (!view) throw new Error('Esa vista ya no existe.');
+    const app = this.app;
+    const previous = app.snapshot();
+    const render = this.render;
+    const active = this.activeId;
+    const restoreHelpers = app.hideHelpers();
+    try {
+      this.restore(id, false);
+      return renderPng(app.renderer, app.scene, app.nav.camera, width, height, () =>
+        app.prepareFrame(),
+      );
+    } finally {
+      restoreHelpers();
+      app.setState(previous, false);
+      this.render = render;
+      this.activeId = active;
+      this.changed(false);
+    }
   }
 
   restore(id: string, animate = true): void {
@@ -185,6 +215,23 @@ export class ViewManager {
     this.changed();
   }
 
+  has(id: string): boolean {
+    return this.views.some((v) => v.id === id);
+  }
+
+  /**
+   * Añade una vista con id, nombre y estado ya preparados (cambios con IA confirmados, o al
+   * rehacerlos). La miniatura sale de la cámara actual: quien llama aplica antes ese estado.
+   */
+  insertPrepared(id: string, name: string, state: ViewerState): void {
+    if (this.has(id)) return;
+    const thumbnail = this.thumbnail();
+    const view = { ...createView(state, name, this.render, thumbnail), id };
+    this.views = [...this.views, view];
+    this.activeId = id;
+    this.changed();
+  }
+
   remove(id: string): void {
     this.views = this.views.filter((v) => v.id !== id);
     if (this.activeId === id) this.activeId = null;
@@ -197,6 +244,15 @@ export class ViewManager {
     const model = this.model;
     if (!model) throw new Error('Carga primero un modelo GLB.');
     return model;
+  }
+
+  /** Las exportaciones usan la materialidad confirmada, nunca una previsualización. */
+  assertExportable(): void {
+    if (this.app.materialPreview) {
+      throw new Error(
+        'Hay una previsualización de materiales sin confirmar: confírmala o descártala antes de exportar.',
+      );
+    }
   }
 
   private exportable(): SceneView[] {
@@ -229,6 +285,7 @@ export class ViewManager {
   }
 
   exportBlenderScript(): void {
+    this.assertExportable();
     if (this.app.model?.tiles) {
       throw new Error(
         'La exportación a Blender de modelos teselados aún no está disponible. ' +
@@ -243,6 +300,7 @@ export class ViewManager {
 
   /** GLB original + cámaras de todas las vistas + luces de la vista activa (o la primera). */
   exportGlbWithLights(): string[] {
+    this.assertExportable();
     const model = this.app.model;
     if (!model) throw new Error('Carga primero un modelo GLB.');
     if (!model.bytes) {
@@ -258,19 +316,20 @@ export class ViewManager {
   }
 
   async exportPng(): Promise<void> {
+    this.assertExportable();
     const { width, height } = this.render;
     const app = this.app;
-    // La regla es una ayuda de pantalla (su etiqueta es HTML): no sale en el render
-    const measureVisible = app.measure.group.visible;
-    app.measure.group.visible = false;
-    let blob: Blob;
+    // La regla y los resaltados son ayudas de pantalla: no salen en el render
+    const restoreHelpers = app.hideHelpers();
+    let pending: Promise<Blob>;
     try {
-      blob = await renderPng(app.renderer, app.scene, app.nav.camera, width, height, () =>
+      pending = renderPng(app.renderer, app.scene, app.nav.camera, width, height, () =>
         app.prepareFrame(),
       );
     } finally {
-      app.measure.group.visible = measureVisible;
+      restoreHelpers();
     }
+    const blob = await pending;
     const active = this.views.find((v) => v.id === this.activeId);
     download(blob, `${active?.name ?? 'render'}_${width}x${height}.png`);
   }

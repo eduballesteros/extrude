@@ -78,11 +78,6 @@ export function sceneToDwg(p: Vec3, origin: Vec3): Vec3 {
   return [p[0] + origin[0], -p[2] + origin[1], p[1] + origin[2]];
 }
 
-/** Coordenadas reales del DWG → escena. */
-export function dwgToScene(p: Vec3, origin: Vec3): Vec3 {
-  return [p[0] - origin[0], p[2] - origin[2], -(p[1] - origin[1])];
-}
-
 /** Escena (Y-up) → Blender (Z-up), igual que hace su importador glTF. */
 export function sceneToBlender(p: Vec3): Vec3 {
   return [p[0], -p[2], p[1]];
