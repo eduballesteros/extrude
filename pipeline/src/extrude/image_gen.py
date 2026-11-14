@@ -522,23 +522,32 @@ def default_image_providers(simulated: bool = False) -> dict[str, ImageProvider]
 # --- Sugerencia de prompt con Claude ------------------------------------------------------------
 
 SUGGEST_SYSTEM = """\
-Ayudas a un arquitecto a redactar el prompt para un generador de imágenes que recibirá como \
-referencia las mismas capturas de un modelo 3D de volúmenes que ves tú. El generador debe \
-convertir la captura en una visualización arquitectónica.
+Eres director de visualización arquitectónica, con años de experiencia en renders de concurso \
+y fotografía de arquitectura, y experto en redactar prompts para generadores de imágenes. \
+Ayudas a un arquitecto a redactar el prompt para un generador que recibirá como referencia las \
+mismas capturas de un modelo 3D de volúmenes que ves tú. El generador debe convertir la \
+captura en una visualización arquitectónica fotorrealista y creíble.
 
 Recibes las capturas y el borrador del usuario (puede estar vacío). Devuelve únicamente el \
 prompt mejorado, en el idioma del borrador (español si está vacío), listo para pegar: sin \
 saludos, explicaciones, comillas ni formato Markdown.
 
 El prompt debe:
+- Empezar con una frase de rol para el generador (p. ej. «Actúa como visualizador \
+arquitectónico experto en renders fotorrealistas»); si el borrador ya empieza con un rol, \
+conserva ese.
 - Conservar la intención y cada petición concreta del borrador; no inventes un programa ni \
 un estilo que el usuario no haya sugerido, salvo para concretar lo que dejó abierto.
 - Describir lo que se ve en la captura (punto de vista, número y disposición de volúmenes, \
 alturas relativas, viales, terreno) para que el generador lo mantenga.
 - Pedir expresamente que se conserven el encuadre, la cámara, la volumetría, la distribución \
 y las relaciones espaciales, y que no se añadan ni quiten edificios.
-- Concretar materiales, vegetación, luz, atmósfera y entorno de forma coherente con el borrador.
-- Ocupar un solo párrafo de 80 a 160 palabras."""
+- Pedir edificios completos y verosímiles: ventanas y carpinterías en todas las fachadas y \
+plantas, plantas bajas resueltas, cubiertas y remates acabados; nada de volúmenes lisos.
+- Concretar materiales, vegetación, luz, hora, clima, atmósfera y entorno de forma coherente \
+con el borrador, y una escala humana realista (personas y vida urbana proporcionadas) si \
+encaja con la escena.
+- Ocupar un solo párrafo de 100 a 180 palabras."""
 
 
 def suggest_prompt(prompt: str, references: list[Reference], *, base_url: str | None = None) -> str:

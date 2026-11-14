@@ -22,15 +22,7 @@ import type { LibraryImage } from '../library/images';
 import type { SceneView } from '../views/viewState';
 import { button, h, icon } from './dom';
 import type { LibraryActions } from './imageLibrary';
-
-/** Sugerencias opcionales: se añaden al prompt al pulsarlas; nunca se envían solas. */
-const SUGGESTIONS = [
-  'visualización arquitectónica fotorrealista',
-  'materiales claros (piedra clara, hormigón blanco, madera)',
-  'vegetación abundante y arbolado maduro',
-  'luz natural suave de tarde',
-  'contexto paisajístico con colinas al fondo',
-];
+import { applySuggestion, promptHas, SUGGESTION_CATEGORIES } from './promptSuggestions';
 
 /** Frase opcional de fidelidad: se muestra entera y el usuario decide si se añade. */
 export const FIDELITY_SENTENCE =
@@ -92,6 +84,8 @@ export class GenerateDialog {
   private planError: string | null = null;
   private planToken = 0;
   private suggestion: string | null = null;
+  /** Categoría de frases opcionales visible (se recuerda mientras el visor esté abierto). */
+  private category = SUGGESTION_CATEGORIES[0]!.id;
   private suggesting = false;
   private error: string | null = null;
   private sources: PreparedSource[] = [];
@@ -479,22 +473,49 @@ export class GenerateDialog {
       this.renderFooter();
     });
     syncCounter();
-    const chips = h('div', { class: 'generate-chips' });
-    for (const suggestion of SUGGESTIONS) {
-      chips.append(
-        button({
-          label: `+ ${suggestion}`,
-          variant: 'ghost',
-          size: 'sm',
-          title: 'Añadir al prompt (opcional)',
-          onClick: () => {
-            const base = this.prompt.trim();
-            this.prompt = base ? `${base.replace(/[,.;]$/, '')}, ${suggestion}` : suggestion;
-            this.touched();
-            this.render();
-          },
-        }),
-      );
+    // Frases opcionales por categorías: se añaden al pulsarlas; el rol abre el prompt
+    const categories = h('div', {
+      class: 'generate-categories',
+      attrs: { role: 'tablist', 'aria-label': 'Categorías de frases opcionales' },
+    });
+    for (const category of SUGGESTION_CATEGORIES) {
+      const tab = button({
+        label: category.label,
+        variant: 'ghost',
+        size: 'sm',
+        onClick: () => {
+          this.category = category.id;
+          this.render();
+        },
+      });
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(category.id === this.category));
+      categories.append(tab);
+    }
+    const active =
+      SUGGESTION_CATEGORIES.find((category) => category.id === this.category) ??
+      SUGGESTION_CATEGORIES[0]!;
+    const chips = h('div', { class: 'generate-chips', attrs: { role: 'tabpanel' } });
+    for (const phrase of active.phrases) {
+      const added = promptHas(this.prompt, phrase);
+      const chip = button({
+        label: `${added ? '✓' : '+'} ${phrase}`,
+        variant: 'ghost',
+        size: 'sm',
+        title: added
+          ? 'Ya está en el prompt'
+          : active.position === 'start'
+            ? 'Poner al principio del prompt (sustituye otro rol)'
+            : 'Añadir al prompt (opcional)',
+        onClick: () => {
+          this.prompt = applySuggestion(this.prompt, active, phrase);
+          this.touched();
+          this.render();
+        },
+      });
+      chip.disabled = added;
+      chip.setAttribute('aria-pressed', String(added));
+      chips.append(chip);
     }
     const keep = h('input', { type: 'checkbox', checked: this.keepGeometry });
     keep.addEventListener('change', () => {
@@ -631,6 +652,7 @@ export class GenerateDialog {
         '2',
         'Prompt',
         h('div', { class: 'generate-prompt-wrap' }, textarea, counter),
+        categories,
         chips,
         h(
           'label',

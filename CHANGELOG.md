@@ -2,6 +2,17 @@
 
 ## Sin publicar
 
+### Prompts de imagen más completos
+
+- Frases opcionales por categorías en «Generar con IA» (más de 120): rol, estilo, edificios
+  completos (ventanas, carpinterías, balcones, plantas bajas, cubiertas), tipos de edificio,
+  materiales, gente y vida urbana (personas paseando, corriendo, ciclistas…), movilidad,
+  vegetación y paisaje, mobiliario urbano, luz y hora, clima y estación, cámara y ambiente.
+  El rol abre el prompt y sustituye al anterior; las frases ya añadidas se marcan.
+- «Mejorar con Claude» trabaja como director de visualización arquitectónica: empieza con un
+  rol para el generador y pide edificios completos con ventanas en todas las plantas y una
+  escala humana realista.
+
 ### Claves de IA en un único .env
 
 - `extrude serve` carga las claves de IA (y las variables `EXTRUDE_*`) del `.env` de la raíz
