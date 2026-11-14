@@ -23,6 +23,18 @@ export const GENERATOR = 'extrude-viewer 0.1.0';
 
 type Listener = () => void;
 
+/**
+ * «Vista N» con el siguiente número libre. Contar las vistas repetía nombres: con «Vista 1» y
+ * «Vista 2», borrar la 1 hacía que la siguiente volviera a llamarse «Vista 2».
+ */
+export function nextViewName(views: readonly { name: string }[]): string {
+  const used = views
+    .map((view) => /^Vista (\d+)$/.exec(view.name.trim())?.[1])
+    .filter((n): n is string => n !== undefined)
+    .map(Number);
+  return `Vista ${Math.max(0, ...used) + 1}`;
+}
+
 /** Lista de vistas del modelo cargado: CRUD, persistencia y exportaciones. */
 export class ViewManager {
   views: SceneView[] = [];
@@ -114,12 +126,7 @@ export class ViewManager {
     state.camera.fovDeg = renderFov(state.camera.fovDeg, viewportAspect, this.aspect);
     state.camera.orthoSize *= frameHeightFraction(viewportAspect, this.aspect);
     const thumbnail = this.thumbnail();
-    const view = createView(
-      state,
-      name ?? `Vista ${this.views.length + 1}`,
-      this.render,
-      thumbnail,
-    );
+    const view = createView(state, name ?? nextViewName(this.views), this.render, thumbnail);
     this.views = [...this.views, view];
     this.activeId = view.id;
     this.changed();
