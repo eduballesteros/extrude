@@ -18,6 +18,7 @@ Reglas:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -490,6 +491,64 @@ Convenciones: metros; x = este, y = norte del plano (+Y del dibujo), relativas a
 altura; floorH = altura de planta configurada (null = desconocida: en building.set_height con
 plantas pon floorHeightM solo si el usuario la da). pieceSizeM es el tamaño de UNA pieza
 (ladrillo, losa). No inventes objetos, materiales ni geometría; sin URLs, rutas ni código."""
+
+
+# Esquema compacto (Anthropic). La salida estructurada de Anthropic compila el esquema a una
+# gramática con límites (16 campos con varios tipos, 24 opcionales y un tamaño máximo): el
+# esquema completo, con los argumentos de las 17 herramientas, los supera y la API responde 400.
+# En el compacto, `args` viaja como TEXTO JSON y el esquema de cada herramienta va en las
+# instrucciones; al recibir la respuesta se convierte a objeto y se valida igual que siempre.
+COMPACT_ARGS_NOTE = """
+
+Formato de args: en tu respuesta, args es un TEXTO que contiene un objeto JSON (no un objeto),
+con todas las claves del esquema de su herramienta (null donde no aplique). Esquemas por
+herramienta:
+"""
+
+
+def compact_raw_schema(library: MaterialLibrary = DEFAULT_LIBRARY) -> dict[str, Any]:
+    """`raw_schema` con una sola forma de operación: tool (enum) y args como texto JSON."""
+    schema = raw_schema(library)
+    first = schema["properties"]["operations"]["items"]["anyOf"][0]
+    operation = _obj(
+        {
+            **first["properties"],
+            "tool": {"type": "string", "enum": list(TOOLS)},
+            "args": TEXT,
+        }
+    )
+    schema["properties"]["operations"] = {"type": "array", "items": operation}
+    return schema
+
+
+def compact_system_prompt(library: MaterialLibrary = DEFAULT_LIBRARY) -> str:
+    args = {name: tool_args_schema(name, library) for name in TOOLS}
+    return (
+        SYSTEM_PROMPT
+        + COMPACT_ARGS_NOTE
+        + json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
+def expand_compact_output(text: str) -> str:
+    """Convierte `args` de texto JSON a objeto. Si no es JSON válido se deja tal cual y la
+    validación lo rechaza como respuesta fuera de esquema (nunca se adivina)."""
+    try:
+        data = json.loads(text, parse_constant=_reject_constant)
+    except ValueError:
+        return text
+    operations = data.get("operations") if isinstance(data, dict) else None
+    if not isinstance(operations, list):
+        return text
+    for operation in operations:
+        if isinstance(operation, dict) and isinstance(operation.get("args"), str):
+            with contextlib.suppress(ValueError):
+                operation["args"] = json.loads(operation["args"], parse_constant=_reject_constant)
+    return json.dumps(data, ensure_ascii=False)
+
+
+def uses_compact_schema(provider: Provider) -> bool:
+    return bool(getattr(provider, "compact_schema", False))
 
 
 def current_presets(library: MaterialLibrary) -> dict[str, MaterialPreset]:
@@ -1486,6 +1545,8 @@ class AiService:
         self._jobs: dict[str, _JobState] = defaultdict(_JobState)
         self._lock = threading.Lock()
         self.schema = raw_schema(library)
+        self.compact_schema = compact_raw_schema(library)
+        self.compact_system = compact_system_prompt(library)
 
     def _limit_check(self, provider: Provider) -> tuple[str, str | None]:
         known = KNOWN_LIMITS.get(provider.model)
@@ -1611,7 +1672,7 @@ class AiService:
         return {
             "provider": provider.id,
             "model": provider.model,
-            "system": SYSTEM_PROMPT,
+            "system": self.compact_system if uses_compact_schema(provider) else SYSTEM_PROMPT,
             "user": context.payload,
             "contextHash": self.context_hash(provider, context),
             "baseRevision": project.state.current,
@@ -1706,10 +1767,11 @@ class AiService:
             state.requests += 1
         started = time.monotonic()
         try:
+            compact = uses_compact_schema(provider)
             completion: Completion = provider.complete(
-                system=SYSTEM_PROMPT,
+                system=self.compact_system if compact else SYSTEM_PROMPT,
                 user=context.user_text,
-                schema=self.schema,
+                schema=self.compact_schema if compact else self.schema,
                 max_output_tokens=self.limits.max_output_tokens,
                 timeout_s=self.limits.timeout_s,
             )
@@ -1740,14 +1802,15 @@ class AiService:
                 self._jobs[job_id].active = False
         duration = round((time.monotonic() - started) * 1000)
         stored = {
-            "text": completion.text,
+            # Ya con args como objeto: la caché y la validación ven siempre el formato completo
+            "text": expand_compact_output(completion.text) if compact else completion.text,
             "model": completion.model,
             "usage": completion.usage.as_dict(),
             "durationMs": duration,
             "createdAt": datetime.now(UTC).isoformat(timespec="seconds"),
         }
         try:
-            plan = validate_plan(parse_output(completion.text), context, project, self.library)
+            plan = validate_plan(parse_output(stored["text"]), context, project, self.library)
         except ProposalRejected as exc:
             self._log(
                 job_dir,
