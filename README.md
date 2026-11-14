@@ -44,7 +44,14 @@ IA. Todo desde el visor web, sin instalar programas de 3D.
 Ábrela en el navegador e inicia sesión con el usuario que te hayan dado. No necesitas instalar
 nada. Dentro del visor, el botón **Guía** explica todo paso a paso.
 
-### En tu ordenador, con Docker
+### En un ordenador con Windows, con icono
+
+Instala [Docker Desktop](https://www.docker.com/products/docker-desktop/), copia la carpeta de
+Extrude y haz doble clic en **Instalar Extrude.bat**. Crea un icono **Extrude** en el escritorio
+y en el menú Inicio que lo arranca todo y lo abre en su propia ventana, como una aplicación.
+Paso a paso: [docs/INSTALAR_WINDOWS.md](docs/INSTALAR_WINDOWS.md).
+
+### En tu ordenador, con Docker (cualquier sistema)
 
 1. Instala y abre [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. En la carpeta de Extrude, ejecuta:
@@ -56,9 +63,8 @@ nada. Dentro del visor, el botón **Guía** explica todo paso a paso.
 3. Abre **[localhost:8080](http://localhost:8080)**.
 
 La primera vez tarda unos minutos en prepararse; las siguientes arranca en segundos. Solo es
-accesible desde tu ordenador y no pide usuario. Acepta planos **DXF** y modelos GLB/GLTF; si tu
-plano es DWG, guárdalo antes como DXF desde tu programa de CAD (en AutoCAD o BricsCAD,
-«Guardar como» → DXF 2018).
+accesible desde tu ordenador y no pide usuario. Acepta planos **DWG** y **DXF** y modelos
+GLB/GLTF.
 
 | Para… | Ejecuta |
 |---|---|
@@ -132,7 +138,7 @@ modelos y límites con variables `EXTRUDE_*` en el mismo `.env` (por ejemplo
 
 | Lo que ves | Qué hacer |
 |---|---|
-| No acepta mi DWG | Guárdalo como DXF desde tu programa de CAD. En servidores con conversor instalado, el DWG se acepta directamente |
+| No acepta mi DWG | Algunos DWG muy recientes no se leen bien: guárdalo como DXF 2018 desde tu programa de CAD y suéltalo de nuevo |
 | El modelo sale diminuto o gigantesco | Las unidades del plano no son las esperadas: revisa las unidades en la configuración del proyecto |
 | Faltan edificios | Mira en el resumen de calidad las capas pendientes y cámbiales el tipo en **Capas → Revisión del proyecto** |
 | Edificios flotando o enterrados | **Capas → Revisión del proyecto → Aplicar y reconvertir** |
@@ -206,8 +212,9 @@ Después, en terminales separadas: `uv run --project pipeline extrude serve` y
 Los trabajos se guardan en el volumen `extrude-local_projects`, con la retención del
 modo local (los 10 trabajos terminados más recientes). Las vistas se guardan en el
 navegador: usa siempre la misma dirección para recuperarlas. `docker compose down -v`
-borra el volumen de trabajos. La imagen admite DXF y GLB/GLTF; para DWG, convierte
-antes el plano a DXF, pues no incluye ODA ni LibreDWG.
+borra el volumen de trabajos. La imagen incluye LibreDWG (`dwg2dxf` 0.14, compilado desde el
+código fuente oficial con su suma verificada), así que acepta DWG además de DXF y GLB/GLTF;
+no incluye ODA File Converter.
 
 La IA es opcional: añade las claves necesarias (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `GEMINI_API_KEY`) a un archivo `.env` en la raíz, con una línea `NOMBRE=valor` por clave,

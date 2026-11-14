@@ -9,6 +9,17 @@ _Nada todavía._
 Primera versión estable: del plano al modelo 3D, su revisión, materiales, vistas e imágenes
 de presentación con IA, todo desde el visor web, en local con Docker o en un servidor.
 
+### Instalación en Windows con icono
+
+- `Instalar Extrude.bat`: crea los accesos directos **Extrude** (escritorio y menú Inicio) y
+  **Actualizar Extrude**, prepara el archivo de claves de IA y deja Extrude listo.
+- El icono arranca Docker Desktop si hace falta, levanta Extrude y lo abre en su propia ventana
+  (modo aplicación de Edge o Chrome), siempre en el mismo navegador para conservar vistas e
+  imágenes. Guía: `docs/INSTALAR_WINDOWS.md`.
+- La imagen de Docker incluye LibreDWG 0.14 (`dwg2dxf`), compilado desde el código fuente
+  oficial con su suma verificada: los planos DWG se aceptan directamente, sin convertirlos
+  antes a DXF.
+
 ### La IA de imágenes distingue viales de edificios
 
 - Leyenda de capas opcional en «Generar con IA» (marcada por defecto): explica al generador

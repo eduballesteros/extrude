@@ -14,6 +14,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 PUBLIC = Path(__file__).resolve().parents[1] / "public"
+WINDOWS = Path(__file__).resolve().parents[2] / "windows"
 SIZE = 64
 INK = "#000000"
 PAPER = "#ffffff"
@@ -86,6 +87,14 @@ def main() -> None:
     png(180, rounded=False).save(PUBLIC / "apple-touch-icon.png")
     png(192).save(PUBLIC / "icon-192.png")
     png(512).save(PUBLIC / "icon-512.png")
+    # Icono del lanzador de Windows (escritorio y menú Inicio): hasta 256 px para que sea nítido
+    large = [png(16, stroke=6.0), png(24, stroke=5.5)]
+    large += [png(size) for size in (32, 48, 64, 128, 256)]
+    large[-1].save(
+        WINDOWS / "extrude.ico",
+        sizes=[(i.width, i.height) for i in large],
+        append_images=large[:-1],
+    )
     print("Iconos escritos en", PUBLIC)
 
 

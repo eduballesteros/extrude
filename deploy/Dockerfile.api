@@ -6,6 +6,24 @@ COPY tools/package*.json ./
 RUN npm ci --omit=dev
 COPY tools/*.mjs ./
 
+# DWG → DXF: LibreDWG (GNU, GPL-3.0) compilado desde el código fuente oficial, con su suma
+# verificada. Debian bookworm no lo empaqueta. Solo se copian dwg2dxf y su biblioteca.
+FROM debian:bookworm-slim AS libredwg
+ARG LIBREDWG_VERSION=0.14
+ARG LIBREDWG_SHA256=62ebb73b984f865960f20ed26619ea5f8789d5e3fd088fa40a2598384da81275
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates curl pkg-config python3 xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN curl -fsSLo libredwg.tar.xz \
+        "https://ftp.gnu.org/gnu/libredwg/libredwg-${LIBREDWG_VERSION}.tar.xz" \
+    && echo "${LIBREDWG_SHA256}  libredwg.tar.xz" | sha256sum -c - \
+    && tar -xf libredwg.tar.xz --strip-components=1 \
+    && ./configure --prefix=/opt/libredwg --disable-bindings \
+    && make -j"$(nproc)" \
+    && make install \
+    && /opt/libredwg/bin/dwg2dxf --version
+
 FROM python:3.12.13-slim-bookworm AS python-build
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /opt/extrude/pipeline
@@ -25,6 +43,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 ca-c
 COPY --from=python-build /opt/extrude/pipeline/.venv /opt/extrude/pipeline/.venv
 COPY --from=tools /usr/local/bin/node /usr/local/bin/node
 COPY --from=tools /opt/extrude/tools /opt/extrude/tools
+COPY --from=libredwg /opt/libredwg/bin/dwg2dxf /usr/local/bin/dwg2dxf
+COPY --from=libredwg /opt/libredwg/lib/libredwg.so* /usr/local/lib/
+RUN ldconfig && dwg2dxf --version
 COPY deploy/runtime.py /opt/extrude/runtime.py
 COPY deploy/maintenance.py /opt/extrude/maintenance.py
 USER 10001:10001
