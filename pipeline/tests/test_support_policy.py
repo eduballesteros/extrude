@@ -454,6 +454,34 @@ def test_names_are_only_one_piece_of_evidence(layer: str, kind: Kind) -> None:
     assert guess_kind(layer) is kind
 
 
+@pytest.mark.parametrize(
+    "layer",
+    [
+        "_EJE TRANSPORTES",
+        "RED_VIARIA",
+        "CARRIL BICI",
+        "AVENIDAS",
+        "AUTOVIA A-6",
+        "RONDA SUR",
+        "ROTONDAS",
+        "PAVIMENTOS",
+        "ZONA PEATONAL",
+        "CAMINOS RURALES",
+        "PARKING",
+        "ASFALTO",
+    ],
+)
+def test_common_names_for_roads_and_paths_are_recognised(layer: str) -> None:
+    """Vocabulario general de viales: sin reconocerlo, la capa se levantaba como un edificio y
+    en las capturas (y en las imágenes de IA) una calle parecía un muro."""
+    assert guess_kind(layer) is Kind.ROAD
+
+
+@pytest.mark.parametrize("layer", ["EJES", "EJE_REPLANTEO", "COTAS", "TEXTOS"])
+def test_ambiguous_names_are_not_taken_for_roads(layer: str) -> None:
+    assert guess_kind(layer) is not Kind.ROAD
+
+
 def _mixed_site(msp: Modelspace) -> None:
     slope(msp, -20.0)
     square(msp, 10, 10, "EDIF")

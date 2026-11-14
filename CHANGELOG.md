@@ -2,6 +2,17 @@
 
 ## Sin publicar
 
+### La IA de imágenes distingue viales de edificios
+
+- Leyenda de capas opcional en «Generar con IA» (marcada por defecto): explica al generador
+  qué es cada cosa de la captura según el tipo de cada capa visible en la vista (edificios,
+  viales, agua, vegetación, terreno). Vale para cualquier proyecto; «Mejorar con Claude» la
+  recibe también.
+- El importador reconoce más nombres de viales (TRANSPORTE, VIARIO, CARRIL, BICI, AVENIDA,
+  AUTOVÍA, AUTOPISTA, RONDA, ROTONDA, ASFALTO, PAVIMENTO, PEATONAL, CAMINO, SENDERO,
+  PARKING): antes esas capas se levantaban como edificios y una calle parecía un muro. Las
+  palabras ambiguas (EJE) no cuentan. Afecta a las importaciones nuevas.
+
 ### Prompts de imagen más completos
 
 - Frases opcionales por categorías en «Generar con IA» (más de 120): rol, estilo, edificios
