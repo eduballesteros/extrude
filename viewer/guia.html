@@ -676,8 +676,9 @@ layers:                # gana la PRIMERA regla que encaje
           <h3>Generar imágenes con IA a partir de una vista</h3>
           <ol class="g-steps">
             <li>
-              Pulsa <strong>IA</strong> en una vista (o <strong>Generar con IA</strong> en la
-              Biblioteca) y elige hasta cuatro vistas de origen. Se usa su captura más reciente; si
+              Pulsa <strong>IA</strong> en una vista: se usará solo esa. Desde
+              <strong>Generar con IA</strong> en la Biblioteca puedes combinar hasta cuatro vistas
+              de origen, marcándolas en el paso 1. De cada vista se usa su captura más reciente; si
               no hay, se captura en HD.
             </li>
             <li>
@@ -710,6 +711,14 @@ layers:                # gana la PRIMERA regla que encaje
               «Ampliada», nunca como 4K nativo.
             </li>
           </ol>
+          <div class="g-callout">
+            <strong>Para mejores imágenes:</strong> empieza con un <strong>rol</strong>, pide
+            <strong>edificios completos</strong> (ventanas en todas las plantas, plantas bajas y
+            cubiertas acabadas), añade <strong>gente y vida urbana</strong>, concreta la luz y el
+            clima, deja marcada la <strong>leyenda de capas</strong> y guarda un encuadre cercano a
+            lo que quieres mostrar. Si una calle aparece como muro, revisa en
+            <strong>Capas</strong> que esa capa sea de tipo vial.
+          </div>
           <div class="g-callout g-callout-warn">
             <strong>La IA no garantiza la geometría.</strong> El proveedor crea una imagen nueva a
             partir de la referencia: puede cambiar volúmenes, huecos o el encuadre. Compárala
@@ -1182,7 +1191,11 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
             </details>
             <details>
               <summary>IA: «El alcance tiene N objetos…»</summary>
-              <p>Demasiados objetos para una consulta: marca los afectados o elige una capa.</p>
+              <p>
+                Demasiados objetos para una consulta (el límite protege del coste): marca los
+                objetos afectados o elige una capa en <strong>Alcance</strong>. Si necesitas
+                trabajar con todo el modelo a la vez, pide a la administración que suba el límite.
+              </p>
             </details>
             <details>
               <summary>IA: «Confirma o descarta antes tus asignaciones manuales»</summary>
@@ -1235,6 +1248,35 @@ Prepara una vista desde el sur al atardecer centrada en E-006</code></pre>
               <p>
                 El proveedor devolvió menos resolución de la solicitada. Se guarda y se muestra la
                 real; puedes ampliarla (quedará marcada como ampliada) o probar otro modelo.
+              </p>
+            </details>
+            <details>
+              <summary>Imágenes: la IA confunde una calle con un muro (o al revés)</summary>
+              <p>
+                Lo más habitual es que la capa de la calle esté clasificada como edificio y se haya
+                levantado como un volumen. En <strong>Capas</strong> (o en
+                <strong>Revisión del proyecto</strong>) cámbiala a tipo vial y reconvierte. Al
+                generar, deja marcada la <strong>leyenda de capas</strong>: explica a la IA qué es
+                cada cosa de la captura.
+              </p>
+            </details>
+            <details>
+              <summary>Imágenes: se han enviado vistas que no quería</summary>
+              <p>
+                Al pulsar <strong>IA</strong> en una vista solo se envía esa vista. Si abres
+                <strong>Generar con IA</strong> desde la Biblioteca, revisa las casillas del paso 1.
+                Antes de generar, <strong>Revisar envío</strong> muestra exactamente qué capturas
+                salen.
+              </p>
+            </details>
+            <details>
+              <summary>Mis vistas han desaparecido o hay dos con el mismo nombre</summary>
+              <p>
+                Las vistas y la biblioteca se guardan en este navegador, por proyecto. Entra siempre
+                por la misma dirección y abre cada proyecto en <strong>una sola pestaña</strong>:
+                con dos pestañas del mismo proyecto, una puede pisar lo que guardó la otra. Para
+                llevarlas a otro equipo, expórtalas e impórtalas desde el menú
+                <strong>Exportar</strong>.
               </p>
             </details>
             <details>
