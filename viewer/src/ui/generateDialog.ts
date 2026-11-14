@@ -22,6 +22,7 @@ import type { LibraryImage } from '../library/images';
 import type { SceneView } from '../views/viewState';
 import { button, h, icon } from './dom';
 import type { LibraryActions } from './imageLibrary';
+import { layerLegend } from './layerLegend';
 import { applySuggestion, promptHas, SUGGESTION_CATEGORIES } from './promptSuggestions';
 
 /** Frase opcional de fidelidad: se muestra entera y el usuario decide si se añade. */
@@ -42,10 +43,20 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Prompt que se envía: el texto del usuario y, si lo marca, la frase de fidelidad. */
-export function finalPrompt(text: string, keepGeometry: boolean): string {
+/**
+ * Prompt que se envía: el texto del usuario y, si las marca, la leyenda de capas y la frase de
+ * fidelidad. Sin texto del usuario no se añade nada.
+ */
+export function finalPrompt(
+  text: string,
+  keepGeometry: boolean,
+  legend: string | null = null,
+): string {
   const prompt = text.trim();
-  return keepGeometry && prompt ? `${prompt}\n\n${FIDELITY_SENTENCE}` : prompt;
+  if (!prompt) return prompt;
+  return [prompt, legend, keepGeometry ? FIDELITY_SENTENCE : null]
+    .filter((part): part is string => Boolean(part))
+    .join('\n\n');
 }
 
 /**
@@ -77,6 +88,8 @@ export class GenerateDialog {
   private selected: string[] = [];
   private prompt = '';
   private keepGeometry = true;
+  /** Añadir la leyenda de capas (qué es cada cosa en la captura, según el tipo de capa). */
+  private includeLegend = true;
   private provider = '';
   private model = '';
   private target: Target = 'hd';
@@ -251,7 +264,7 @@ export class GenerateDialog {
     if (!provider.available) return `${provider.name}: ${provider.reason ?? 'no disponible'}`;
     if (!this.model.trim()) return 'Indica el modelo de generación.';
     if (!this.prompt.trim()) return 'Escribe el prompt: es la instrucción principal.';
-    if (finalPrompt(this.prompt, this.keepGeometry).length > this.maxPrompt) {
+    if (this.composedPrompt().length > this.maxPrompt) {
       return `El prompt supera ${this.maxPrompt} caracteres.`;
     }
     if (this.planError) return this.planError;
@@ -300,6 +313,21 @@ export class GenerateDialog {
     this.render();
   }
 
+  /** Leyenda de las capas visibles en la primera vista elegida (la que fija el encuadre). */
+  private legend(): string | null {
+    const view = this.views.find((v) => v.id === this.selected[0]);
+    const layers = [...this.actions.ctx.app.layers.layers.values()].map((info) => ({
+      name: info.name,
+      kind: info.kind,
+      visible: view?.layers[info.name]?.visible ?? true,
+    }));
+    return layerLegend(layers);
+  }
+
+  private composedPrompt(): string {
+    return finalPrompt(this.prompt, this.keepGeometry, this.includeLegend ? this.legend() : null);
+  }
+
   private async suggest(): Promise<void> {
     if (this.suggesting) return;
     this.suggesting = true;
@@ -307,8 +335,10 @@ export class GenerateDialog {
     this.render();
     try {
       const sources = await this.prepareSources();
+      // Claude ve las mismas capturas: la leyenda le dice qué es cada cosa
+      const legend = this.includeLegend ? this.legend() : null;
       this.suggestion = await this.client.suggest(
-        this.prompt,
+        legend ? `${this.prompt.trim()}\n\n${legend}`.trim() : this.prompt,
         sources.map((source) => ({ data: source.sent.data })),
       );
     } catch (error) {
@@ -326,7 +356,7 @@ export class GenerateDialog {
     const provider = this.providerInfo();
     const first = this.sources[0];
     if (!provider || !first) return;
-    const prompt = finalPrompt(this.prompt, this.keepGeometry);
+    const prompt = this.composedPrompt();
     this.phase = 'running';
     this.error = null;
     this.job = null;
@@ -462,7 +492,7 @@ export class GenerateDialog {
     });
     const counter = h('span', { class: 'ai-counter mono' });
     const syncCounter = (): void => {
-      const length = finalPrompt(this.prompt, this.keepGeometry).length;
+      const length = this.composedPrompt().length;
       counter.textContent = `${length}/${this.maxPrompt}`;
       counter.classList.toggle('is-over', length > this.maxPrompt);
     };
@@ -520,6 +550,17 @@ export class GenerateDialog {
     const keep = h('input', { type: 'checkbox', checked: this.keepGeometry });
     keep.addEventListener('change', () => {
       this.keepGeometry = keep.checked;
+      this.touched();
+      syncCounter();
+    });
+    const legendText = this.legend();
+    const legendBox = h('input', {
+      type: 'checkbox',
+      checked: this.includeLegend && legendText !== null,
+    });
+    legendBox.disabled = legendText === null;
+    legendBox.addEventListener('change', () => {
+      this.includeLegend = legendBox.checked;
       this.touched();
       syncCounter();
     });
@@ -657,6 +698,16 @@ export class GenerateDialog {
         h(
           'label',
           { class: 'generate-check' },
+          legendBox,
+          h('span', {
+            textContent: legendText
+              ? `Añadir la leyenda de capas: «${legendText}»`
+              : 'Leyenda de capas: no hay capas visibles de un tipo conocido en esta vista.',
+          }),
+        ),
+        h(
+          'label',
+          { class: 'generate-check' },
           keep,
           h('span', { textContent: `Añadir al final: «${FIDELITY_SENTENCE}»` }),
         ),
@@ -762,7 +813,7 @@ export class GenerateDialog {
         h('strong', { class: 'generate-label', textContent: 'Prompt exacto' }),
         h('pre', {
           class: 'generate-final',
-          textContent: finalPrompt(this.prompt, this.keepGeometry),
+          textContent: this.composedPrompt(),
         }),
         plan ? this.note(plan.note, plan.native ? '' : 'is-warning') : null,
         this.note(
