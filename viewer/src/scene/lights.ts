@@ -13,7 +13,6 @@ import {
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { RectAreaLightHelper } from 'three/examples/jsm/helpers/RectAreaLightHelper.js';
-import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import type { LightState, LightType, Vec3 } from '../state';
 
 const DEG = Math.PI / 180;
@@ -24,7 +23,25 @@ interface Entry {
   helper: Object3D & { update?: () => void; dispose?: () => void };
 }
 
+/**
+ * Las luces de área necesitan unas tablas (RectAreaLightUniformsLib, ~240 kB) que se descargan
+ * solo cuando aparece la primera; hasta entonces esa luz no se crea.
+ */
 let rectAreaReady = false;
+let rectAreaLoading: Promise<void> | null = null;
+
+function loadRectArea(): Promise<void> {
+  rectAreaLoading ??= import('three/examples/jsm/lights/RectAreaLightUniformsLib.js').then(
+    ({ RectAreaLightUniformsLib }) => {
+      RectAreaLightUniformsLib.init();
+      rectAreaReady = true;
+    },
+  );
+  rectAreaLoading.catch(() => {
+    rectAreaLoading = null;
+  });
+  return rectAreaLoading;
+}
 
 export function newLightState(type: LightType, position: Vec3, target: Vec3): LightState {
   const base = { id: crypto.randomUUID(), type, position, color: '#ffe8c0' };
@@ -48,10 +65,6 @@ function createLight(state: LightState): Light {
       return spot;
     }
     case 'area':
-      if (!rectAreaReady) {
-        RectAreaLightUniformsLib.init();
-        rectAreaReady = true;
-      }
       return new RectAreaLight();
   }
 }
@@ -67,6 +80,7 @@ export class ExtraLights {
   private readonly entries = new Map<string, Entry>();
   private readonly gizmo: TransformControls;
   private selectedId: string | null = null;
+  private states: LightState[] = [];
 
   constructor(
     private readonly scene: Scene,
@@ -96,6 +110,7 @@ export class ExtraLights {
   }
 
   sync(states: LightState[]): void {
+    this.states = states;
     const ids = new Set(states.map((s) => s.id));
     for (const [id, entry] of this.entries) {
       if (!ids.has(id)) this.remove(id, entry);
@@ -104,6 +119,12 @@ export class ExtraLights {
       let entry = this.entries.get(state.id);
       if (!entry || this.typeOf(entry.light) !== state.type) {
         if (entry) this.remove(state.id, entry);
+        if (state.type === 'area' && !rectAreaReady) {
+          loadRectArea()
+            .then(() => this.sync(this.states))
+            .catch((error: unknown) => console.error('No se pudo cargar la luz de área', error));
+          continue;
+        }
         const light = createLight(state);
         entry = { light, helper: createHelper(light) };
         this.scene.add(light);
@@ -115,6 +136,9 @@ export class ExtraLights {
       this.applyTo(entry, state);
     }
     if (this.selectedId && !ids.has(this.selectedId)) this.select(null);
+    // Una luz de área seleccionada antes de que llegaran sus tablas: el gizmo se engancha ahora
+    const selected = this.selectedId ? this.entries.get(this.selectedId) : undefined;
+    if (selected && this.gizmo.object !== selected.light) this.gizmo.attach(selected.light);
   }
 
   select(id: string | null): void {

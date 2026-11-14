@@ -125,6 +125,14 @@ BUSY_RETRY_AFTER_S = 30
 # Timeout de lectura por operación del socket: un cliente que deja de enviar libera el hilo
 REQUEST_TIMEOUT_S = 30
 DISCARD_LIMIT_FACTOR = 4
+# Ritmo mínimo de una subida: pasado el margen inicial, quien envía más despacio pierde la
+# conexión. Sin esto, cinco subidas que gotean un byte cada pocos segundos retienen todos los
+# huecos de conversión indefinidamente (cada operación del socket cumple REQUEST_TIMEOUT_S).
+UPLOAD_GRACE_S = 30.0
+UPLOAD_MIN_BYTES_PER_S = 16 * 1024  # 128 kbit/s: 100 MB en algo menos de 2 h
+# Modo compartido: subidas simultáneas por usuario (o por cliente sin sesión), para que nadie
+# ocupe sola la cola de conversión (MAX_WAITING + 1 huecos).
+MAX_UPLOADS_PER_CLIENT = 2
 MAX_PLAN_BODY = 5 * 1024 * 1024
 ALLOWED_INPUTS = {".dwg", ".dxf"}
 JOB_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -957,6 +965,30 @@ def _number(params: dict[str, list[str]], key: str) -> float | None:
     return value
 
 
+class UploadSlots:
+    """Subidas en curso por clave (usuario o cliente), con un máximo por clave."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self._active: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def acquire(self, key: str) -> bool:
+        with self._lock:
+            if self._active.get(key, 0) >= self.limit:
+                return False
+            self._active[key] = self._active.get(key, 0) + 1
+            return True
+
+    def release(self, key: str) -> None:
+        with self._lock:
+            left = self._active.get(key, 0) - 1
+            if left > 0:
+                self._active[key] = left
+            else:
+                self._active.pop(key, None)
+
+
 def make_handler(
     settings: ServerSettings,
     store: JobStore,
@@ -965,6 +997,7 @@ def make_handler(
     images: ImageService | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     work = jobs or ConversionQueue(store)
+    uploads = UploadSlots(MAX_UPLOADS_PER_CLIENT)
     assistant = ai or AiService()
     gallery = images or ImageService(settings.jobs_dir / "_images")
 
@@ -1250,6 +1283,37 @@ def make_handler(
                 if not chunk:
                     break
                 remaining -= len(chunk)
+
+        def _read_upload(self, length: int) -> bytes:
+            """Lee el cuerpo exigiendo un ritmo mínimo (ver UPLOAD_MIN_BYTES_PER_S). `read1`
+            devuelve lo que haya llegado, así el ritmo se comprueba aunque gotee."""
+            start = time.monotonic()
+            data = bytearray()
+            while len(data) < length:
+                chunk = self.rfile.read1(min(length - len(data), 1 << 20))
+                if not chunk:
+                    break
+                data += chunk
+                elapsed = time.monotonic() - start
+                if (
+                    elapsed > UPLOAD_GRACE_S
+                    and len(data) < length
+                    and (len(data) < (elapsed - UPLOAD_GRACE_S) * UPLOAD_MIN_BYTES_PER_S)
+                ):
+                    self.close_connection = True
+                    raise RequestError(
+                        HTTPStatus.REQUEST_TIMEOUT,
+                        "La subida del plano es demasiado lenta y se ha cancelado.",
+                        "Comprueba la conexión y vuelve a soltar el archivo.",
+                    )
+            return bytes(data)
+
+        def _upload_key(self) -> str | None:
+            """Clave para limitar subidas simultáneas; en modo local no se limita."""
+            shared = settings.shared
+            if shared is None:
+                return None
+            return f"user:{shared.current_user}" if shared.current_user else self.client_ip()
 
         def _error(self, status: HTTPStatus, problem: str, fix: str) -> None:
             self._json(status, {"error": problem, "fix": fix})
@@ -1809,6 +1873,7 @@ def make_handler(
                 return
             params = parse_qs(url.query)
             reserved = False
+            upload_key: str | None = None
             if self._forbidden_host():
                 self.close_connection = True
                 return
@@ -1844,12 +1909,25 @@ def make_handler(
                     )
                 is_async = params.get("async", [""])[0].lower() in ("1", "true", "yes")
                 validate_params(params)  # errores de parámetros antes de leer o convertir
+                key = self._upload_key()
+                if key is not None:
+                    if not uploads.acquire(key):
+                        self.close_connection = True
+                        raise RequestError(
+                            HTTPStatus.TOO_MANY_REQUESTS,
+                            f"Ya tienes {MAX_UPLOADS_PER_CLIENT} planos subiéndose a la vez.",
+                            "Espera a que termine alguno y vuelve a intentarlo.",
+                        )
+                    upload_key = key
                 # Admisión ANTES de leer el cuerpo: lleno → 503 sin ocupar memoria ni disco
                 reserved = work.reserve()
                 if not reserved:
                     self._busy()
                     return
-                data = self.rfile.read(length)
+                data = self._read_upload(length)
+                if upload_key is not None:
+                    uploads.release(upload_key)
+                    upload_key = None
                 if len(data) != length:
                     raise RequestError(
                         HTTPStatus.BAD_REQUEST,
@@ -1890,6 +1968,8 @@ def make_handler(
                     "Revisa la consola de extrude serve y prueba con extrude convert.",
                 )
             finally:
+                if upload_key is not None:
+                    uploads.release(upload_key)
                 if reserved:  # síncrono terminado o rechazado tras reservar
                     work.release()
                     store.prune()

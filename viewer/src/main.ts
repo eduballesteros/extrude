@@ -17,7 +17,6 @@ import {
 import type { ConvertResponse } from './convert/client';
 import { ConversionSession } from './convert/session';
 import { Captures } from './library/captures';
-import { ImageGenClient } from './library/generation';
 import { ImageLibrary } from './library/images';
 import { ProjectClient } from './project/heights';
 import {
@@ -30,7 +29,7 @@ import { forgetRecent, loadRecent, saveRecent } from './project/recent';
 import { ConversionDestination } from './convert/destination';
 import { type LoadedModel, ModelDownloadError } from './scene/loader';
 import { FrameOverlay } from './ui/frameOverlay';
-import { GenerateDialog } from './ui/generateDialog';
+import type { GenerateDialog } from './ui/generateDialog';
 import { LibraryActions, LibraryDialog } from './ui/imageLibrary';
 import { Inspector } from './ui/inspector';
 import { MaterialsPanel } from './ui/materialsPanel';
@@ -101,9 +100,29 @@ const libraryActions: LibraryActions = new LibraryActions({
   app,
   views,
   captures,
-  generate: (viewId) => generateDialog.open(viewId),
+  generate: (viewId) => {
+    loadGenerateDialog()
+      .then((dialog) => dialog.open(viewId))
+      .catch((error: unknown) =>
+        app.notify(`No se pudo abrir la generación de imágenes: ${String(error)}`, 'error'),
+      );
+  },
 });
-const generateDialog = new GenerateDialog(libraryActions, new ImageGenClient(destination.server));
+// El diálogo de generación con IA se descarga la primera vez que se abre (no en el arranque)
+let generateDialog: Promise<GenerateDialog> | null = null;
+function loadGenerateDialog(): Promise<GenerateDialog> {
+  generateDialog ??= Promise.all([
+    import('./ui/generateDialog'),
+    import('./library/generation'),
+  ]).then(
+    ([ui, generation]) =>
+      new ui.GenerateDialog(libraryActions, new generation.ImageGenClient(destination.server)),
+  );
+  generateDialog.catch(() => {
+    generateDialog = null; // reintentar en el siguiente clic (p. ej. tras perder la conexión)
+  });
+  return generateDialog;
+}
 const libraryDialog = new LibraryDialog(libraryActions);
 
 const frame = new FrameOverlay(viewport);
@@ -182,7 +201,7 @@ function closeModel(): void {
   project = null;
   layersPanel.setProject(null);
   libraryDialog.close();
-  generateDialog.close();
+  void generateDialog?.then((dialog) => dialog.close()).catch(() => undefined);
   libraryActions.viewer.close();
   pendingLoad = null;
   void offerProjects();
