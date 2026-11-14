@@ -2,6 +2,13 @@
 
 ## Sin publicar
 
+### Claves de IA en un único .env
+
+- `extrude serve` carga las claves de IA (y las variables `EXTRUDE_*`) del `.env` de la raíz
+  del repositorio, el mismo de Docker local. El entorno manda sobre el archivo; muestra solo
+  los nombres cargados. `--env-file` y `--no-env-file`; producción usa `--no-env-file` y
+  sigue tomando las claves del secreto de Compose.
+
 ### Correcciones de la auditoría del servidor
 
 - El hilo de conversión ya no muere ante un error al registrar otro error: el trabajo acaba
