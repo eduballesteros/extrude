@@ -4,6 +4,7 @@ import { generateBlenderScript, toBlenderData } from '../export/blenderScript';
 import { download, downloadText } from '../export/download';
 import { addCamerasAndLights } from '../export/gltfWithLights';
 import { renderPng, thumbnailFromCanvas } from '../export/png';
+import { ProjectLock } from './projectLock';
 import { loadViews, saveViews } from './storage';
 import {
   createView,
@@ -23,6 +24,12 @@ import {
 export const GENERATOR = `extrude-viewer ${(import.meta.env['VITE_APP_VERSION'] as string | undefined) ?? 'dev'}`;
 
 type Listener = () => void;
+
+const READ_ONLY_NOTICE =
+  'Este proyecto ya está abierto en otra ventana de Extrude. Aquí las vistas no se guardarán, para no borrar las de la otra: cierra una de las dos.';
+const READ_ONLY_REMINDER =
+  'No se ha guardado: este proyecto está abierto en otra ventana. Ciérrala para guardar aquí.';
+const REMINDER_INTERVAL_MS = 15_000;
 
 /**
  * «Vista N» con el siguiente número libre. Contar las vistas repetía nombres: con «Vista 1» y
@@ -47,10 +54,21 @@ export class ViewManager {
   private loadToken = 0;
   /** Mientras llegan las vistas guardadas no se persiste: pisaría las del almacenamiento. */
   private loading = false;
+  /** Otra ventana tiene abierto este proyecto: aquí no se guarda (ver projectLock.ts). */
+  private readOnly = false;
+  private lastReminder = 0;
   private readonly listeners = new Set<Listener>();
 
-  constructor(private readonly app: App) {
+  constructor(
+    private readonly app: App,
+    private readonly lock = new ProjectLock(),
+  ) {
     app.on('model', () => void this.onModel());
+  }
+
+  /** Esta ventana no guarda las vistas porque otra tiene abierto el mismo proyecto. */
+  get isReadOnly(): boolean {
+    return this.readOnly;
   }
 
   on(listener: Listener): void {
@@ -60,11 +78,22 @@ export class ViewManager {
   private changed(persist = true): void {
     for (const listener of this.listeners) listener();
     if (persist && this.modelKey && !this.loading) {
+      if (this.readOnly) {
+        this.remindReadOnly();
+        return;
+      }
       saveViews(this.modelKey, this.views).catch((error: unknown) => {
         console.warn(error);
         this.app.notify('No se pudieron guardar las vistas en el navegador: exporta views.json.');
       });
     }
+  }
+
+  private remindReadOnly(): void {
+    const now = Date.now();
+    if (now - this.lastReminder < REMINDER_INTERVAL_MS) return;
+    this.lastReminder = now;
+    this.app.notify(READ_ONLY_REMINDER, 'warning');
   }
 
   get aspect(): number {
@@ -94,10 +123,13 @@ export class ViewManager {
     this.views = [];
     this.activeId = null;
     this.loading = key !== null;
+    this.readOnly = false;
     if (!key) {
+      this.lock.release();
       this.changed(false);
       return;
     }
+    const owned = this.lock.claim(key, () => void this.onLockAcquired(token, key));
     let stored: SceneView[] = [];
     try {
       stored = await loadViews(key);
@@ -109,10 +141,43 @@ export class ViewManager {
     // Si entretanto se abrió otro modelo (o el mismo otra vez), esta carga ya no vale: aplicarla
     // pondría sus vistas en la lista del modelo nuevo y se guardarían bajo su clave.
     if (token !== this.loadToken) return;
+    this.readOnly = !(await owned);
+    if (token !== this.loadToken) return;
     this.loading = false;
+    if (this.readOnly) this.app.notify(READ_ONLY_NOTICE, 'warning');
     const createdWhileLoading = this.views; // p. ej. N pulsada antes de que llegaran las guardadas
     this.views = [...stored, ...createdWhileLoading];
     this.changed(createdWhileLoading.length > 0);
+  }
+
+  /**
+   * La otra ventana soltó el proyecto: esta pasa a guardar. Se releen las vistas que dejó
+   * guardadas y se conservan las creadas aquí mientras tanto, sin perder ninguna.
+   */
+  private async onLockAcquired(token: number, key: string): Promise<void> {
+    if (token !== this.loadToken) return;
+    let stored: SceneView[] = [];
+    try {
+      stored = await loadViews(key);
+    } catch (error) {
+      console.warn(error);
+    }
+    if (token !== this.loadToken) return;
+    const known = new Set(stored.map((view) => view.id));
+    const createdHere = this.views.filter((view) => !known.has(view.id));
+    const wasReadOnly = this.readOnly;
+    this.readOnly = false;
+    this.views = [...stored, ...createdHere];
+    if (this.activeId && !this.views.some((view) => view.id === this.activeId)) {
+      this.activeId = null;
+    }
+    this.changed(createdHere.length > 0);
+    if (wasReadOnly) {
+      this.app.notify(
+        'La otra ventana de este proyecto se ha cerrado: a partir de ahora las vistas se guardan aquí.',
+        'success',
+      );
+    }
   }
 
   setRender(width: number, height: number): void {
