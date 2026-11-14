@@ -592,10 +592,31 @@ button.layer-name:hover {
 .generate-prompt-wrap .ai-counter.is-over {
   color: var(--danger);
 }
+.generate-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.generate-categories .btn {
+  height: 24px;
+  font-size: 11px;
+}
+.generate-categories .btn[aria-selected='true'] {
+  background: var(--accent-sel);
+  color: var(--text-primary);
+  font-weight: 600;
+}
 .generate-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+.generate-chips .btn[aria-pressed='true'] {
+  opacity: 0.55;
 }
 .generate-chips .btn {
   height: 24px;
