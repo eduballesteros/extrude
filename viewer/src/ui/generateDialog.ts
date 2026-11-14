@@ -56,6 +56,25 @@ export function finalPrompt(text: string, keepGeometry: boolean): string {
   return keepGeometry && prompt ? `${prompt}\n\n${FIDELITY_SENTENCE}` : prompt;
 }
 
+/**
+ * Vistas de origen al abrir el diálogo. Abierto desde una vista concreta (`viewId`), esa pasa a
+ * ser la ÚNICA de origen: antes se sumaba a las elegidas la vez anterior y se enviaban todas sin
+ * que el usuario lo viera. Sin `viewId` (menú de la biblioteca) se conserva la selección
+ * anterior. Con una generación en revisión o en curso no se cambia: se envía lo que se revisó.
+ */
+export function openingSelection(
+  previous: readonly string[],
+  known: readonly string[],
+  viewId: string | undefined,
+  phase: 'edit' | 'review' | 'running' | 'done',
+): string[] {
+  const valid = new Set(known);
+  let selected = previous.filter((id) => valid.has(id));
+  if (viewId && valid.has(viewId) && (phase === 'edit' || phase === 'done')) selected = [viewId];
+  if (selected.length === 0 && known[0]) selected = [known[0]];
+  return selected;
+}
+
 export class GenerateDialog {
   readonly element: HTMLElement;
   private readonly body = h('div', { class: 'generate-body' });
@@ -141,12 +160,8 @@ export class GenerateDialog {
 
   open(viewId?: string): void {
     if (this.phase === 'done') this.reset();
-    const known = new Set(this.views.map((view) => view.id));
-    this.selected = this.selected.filter((id) => known.has(id));
-    if (viewId && known.has(viewId) && !this.selected.includes(viewId)) {
-      this.selected = [viewId, ...this.selected].slice(0, this.maxReferences);
-    }
-    if (this.selected.length === 0 && this.views[0]) this.selected = [this.views[0].id];
+    const known = this.views.map((view) => view.id);
+    this.selected = openingSelection(this.selected, known, viewId, this.phase);
     this.element.hidden = false;
     this.render();
     void this.loadProviders();
