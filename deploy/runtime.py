@@ -55,6 +55,8 @@ def main() -> None:
             origin,
             "--max-mb",
             "100",
+            # Producción: claves solo del secreto de Compose, nunca de un .env
+            "--no-env-file",
             # Solo el dominio publicado (y la comprobación de salud interna) en Host
             "--allowed-host",
             parsed.hostname,

@@ -644,7 +644,8 @@ Opciones de `extrude serve`: `--port`, `--host`, `--allowed-host` (nombres acept
 Host al escuchar en todas las interfaces), `--trust-forwarded` (detrás de un proxy propio),
 `--max-mb` (tamaño máximo del plano), `--origin`
 (orígenes del visor permitidos, repetible), `--jobs-dir`, `--ai-simulated`, `--shared --users
-ARCHIVO` (modo multiusuario).
+ARCHIVO` (modo multiusuario), `--env-file` / `--no-env-file` (claves de IA; por defecto, el
+`.env` de la raíz del repositorio).
 
 | Comando | Para qué |
 |---|---|

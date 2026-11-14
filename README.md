@@ -63,7 +63,8 @@ antes el plano a DXF, pues no incluye ODA ni LibreDWG.
 La IA es opcional: añade las claves necesarias (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `GEMINI_API_KEY`) a un archivo `.env` en la raíz, con una línea `NOMBRE=valor` por clave,
 y ejecuta de nuevo `docker compose up -d`. Ese archivo está excluido de Git y de las
-imágenes; las claves se pasan únicamente a la API. No compartas la salida de
+imágenes; las claves se pasan únicamente a la API. `extrude serve` en desarrollo lee el
+mismo archivo. No compartas la salida de
 `docker compose config` si has configurado claves.
 
 Para un servidor con HTTPS y usuarios, utiliza el [despliegue de producción](deploy/README.md).

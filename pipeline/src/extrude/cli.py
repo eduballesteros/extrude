@@ -176,11 +176,34 @@ def serve(
     users: Annotated[
         Path | None, typer.Option(help="Archivo de usuarios (extrude users add) para --shared")
     ] = None,
+    env_file: Annotated[
+        Path | None,
+        typer.Option(
+            help="Archivo con las claves de IA. Por defecto, el .env más cercano dentro del "
+            "repositorio (el mismo de Docker local); el entorno manda sobre el archivo",
+        ),
+    ] = None,
+    no_env_file: Annotated[
+        bool, typer.Option("--no-env-file", help="No leer claves de ningún archivo .env")
+    ] = False,
 ) -> None:
     """Servidor local para que el visor convierta DWG/DXF arrastrándolos."""
     from extrude.access import AccessControl, Accounts, SharedMode
     from extrude.ai_planner import AiService, default_providers
     from extrude.image_gen import ImageService, default_image_providers
+    from extrude.local_env import find_env_file, load_env_file
+
+    if not no_env_file:
+        with _user_errors():
+            if env_file is not None and not env_file.is_file():
+                raise ExtrudeError(
+                    f"No existe el archivo de claves {env_file}.", "Revisa la ruta de --env-file."
+                )
+            found = env_file or find_env_file(Path.cwd())
+            if found is not None:
+                loaded = load_env_file(found)
+                names = ", ".join(loaded) if loaded else "ninguna nueva (vacías o ya definidas)"
+                typer.echo(f"Claves de {found}: {names}")
 
     origins = tuple(origin) if origin else DEFAULT_ORIGINS
     ai = AiService(default_providers(simulated=ai_simulated))

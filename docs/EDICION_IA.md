@@ -56,6 +56,20 @@ operaciones concretas marcadas como **supuesto**, desmarcadas por defecto.
 Las llamadas las hace `extrude serve`; las claves solo existen en su entorno (nunca en el
 navegador, URLs, GLB, `materials.json`, registros ni caché).
 
+La forma más cómoda es el archivo `.env` de la raíz del repositorio (excluido de Git), el
+mismo que usa Docker local: una línea `NOMBRE=valor` por clave. `extrude serve` lo busca en
+la carpeta actual y sus padres sin salir del repositorio, carga solo las claves de proveedores
+y las variables `EXTRUDE_*`, y dice en consola qué nombres ha cargado (nunca los valores). Una
+variable ya definida en el entorno manda sobre el archivo; `--env-file RUTA` usa otro archivo
+y `--no-env-file` no lee ninguno. Producción no lo usa (ver `deploy/README.md`).
+
+```
+ANTHROPIC_API_KEY=sk-ant-…
+EXTRUDE_ANTHROPIC_MODEL=claude-sonnet-5-5   # opcional
+```
+
+También valen variables de entorno:
+
 ```bash
 cd pipeline
 uv sync --extra ai                      # SDK oficiales: anthropic y openai
