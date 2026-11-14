@@ -8,66 +8,162 @@
 
 ![Extrude: de plano a modelo 3D](docs/assets/cover.svg)
 
-Convierte planos DWG/DXF urbanos (proyecto, manzana, barrio o ciudad) en modelos 3D glTF/GLB,
-y los previsualiza en un visor web con control de sol, luces y vistas exportables a Blender.
+Extrude convierte planos urbanos en DWG o DXF (un proyecto, una manzana, un barrio o una ciudad)
+en un **modelo 3D que puedes recorrer en el navegador**: con terreno, sol real según la fecha y el
+lugar, materiales, vistas guardadas, capturas en HD y 4K e imágenes de presentación generadas con
+IA. Todo desde el visor web, sin instalar programas de 3D.
 
-**Python + TypeScript + Three.js.** Conversión por capas, informes trazables y visor local con
-temas claro y oscuro. Versión de desarrollo: **0.1.0**.
-
-[Inicio rápido](#inicio-rápido) · [Configuración](#configuración-por-proyecto) ·
-[Visor](#visor) · [Exportación](#vistas-y-exportación) · [Desarrollo](#desarrollo-y-validación) ·
-[Limitaciones](#limitaciones)
+[Empezar](#empezar) · [Cómo se trabaja](#cómo-se-trabaja) · [IA](#imágenes-y-edición-con-ia) ·
+[Problemas frecuentes](#problemas-frecuentes) · [Limitaciones](#limitaciones) ·
+[Para desarrolladores](#para-desarrolladores-y-administración)
 
 ## Qué puedes hacer
 
-- Convertir plantas, bloques y geometría 3D compatible en GLB, con unidades en metros y origen recentrado.
-- Configurar capas, alturas, plantas y materiales mediante YAML; generar un borrador desde el dibujo.
-- Reconstruir terreno desde curvas o puntos acotados y adaptar edificios mediante zócalos.
-- Revisar alturas supuestas, descartes, flotación, enterramientos y huellas fuera del TIN, con identificadores del plano.
-- Explorar el modelo por capas, medir distancias y estudiar el sol por fecha y ubicación.
-- Guardar vistas con miniaturas y exportar PNG, views.json, scripts de Blender o un GLB con cámaras y luces.
-- Dividir modelos grandes en teselas e instanciar bloques compatibles para reducir draw calls.
-- Ajustar la altura de cada capa desde el visor, resaltar capas y medir con lupa.
-- Capturar vistas en HD y 4K y generar imágenes arquitectónicas con IA a partir de ellas
-  ([docs/VISTAS_E_IMAGENES.md](docs/VISTAS_E_IMAGENES.md)).
+- **Convertir tu plano en 3D** arrastrándolo al visor. Extrude lee las capas, deduce alturas
+  (atributos, textos como «4P» o «B+3», cotas) y propone una configuración que puedes revisar.
+- **Revisar la calidad**: qué alturas son supuestas, qué capas quedan pendientes y qué edificios
+  flotan o se entierran, con la opción de corregirlo y reconvertir sin salir del visor.
+- **Ajustar el modelo**: altura por capa, tipo de cada capa (edificio, vial, agua, vegetación,
+  terreno) y materiales reales con textura por edificio y superficie.
+- **Estudiar el sol y las sombras** en cualquier fecha y hora, con la posición real del lugar.
+- **Medir** distancias, desniveles y pendientes, con lupa para afinar.
+- **Guardar vistas** (cámara, sol, capas y entorno) y sacar **capturas en HD y 4K**.
+- **Generar imágenes de presentación con IA** a partir de tus vistas, con frases de ayuda por
+  categorías (estilo, edificios completos, gente y vida urbana, luz, clima…) y una leyenda de
+  capas para que la IA no confunda, por ejemplo, una calle con un muro.
+- **Editar el proyecto con IA** escribiendo lo que quieres: «sube E-001 dos plantas, ladrillo
+  claro en todos salvo E-004, una vista al atardecer». Ves la propuesta antes de aplicarla y puedes
+  deshacerla.
+- **Llevarlo a Blender** o a otros programas: GLB con cámaras y luces, script de Blender y
+  `views.json`.
 
-## Inicio rápido
+## Empezar
 
-### Con Docker en local
+### Si te han dado una dirección web
 
-Abre Docker Desktop con contenedores Linux (o Docker Engine con Compose en Linux).
-Desde la raíz del repositorio:
+Ábrela en el navegador e inicia sesión con el usuario que te hayan dado. No necesitas instalar
+nada. Dentro del visor, el botón **Guía** explica todo paso a paso.
 
-```sh
-docker compose up -d --build
+### En tu ordenador, con Docker
+
+1. Instala y abre [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+2. En la carpeta de Extrude, ejecuta:
+
+   ```sh
+   docker compose up -d --build
+   ```
+
+3. Abre **[localhost:8080](http://localhost:8080)**.
+
+La primera vez tarda unos minutos en prepararse; las siguientes arranca en segundos. Solo es
+accesible desde tu ordenador y no pide usuario. Acepta planos **DXF** y modelos GLB/GLTF; si tu
+plano es DWG, guárdalo antes como DXF desde tu programa de CAD (en AutoCAD o BricsCAD,
+«Guardar como» → DXF 2018).
+
+| Para… | Ejecuta |
+|---|---|
+| Parar Extrude (conserva tus proyectos) | `docker compose down` |
+| Volver a arrancarlo, o actualizarlo tras descargar una versión nueva | `docker compose up -d --build` |
+| Ver si está funcionando | `docker compose ps` |
+
+Tus proyectos convertidos se guardan en Docker (los 10 más recientes). Las vistas y la biblioteca
+de imágenes se guardan **en tu navegador**: entra siempre por la misma dirección.
+
+### Para desarrollar o contribuir
+
+Ve a [Para desarrolladores y administración](#para-desarrolladores-y-administración).
+
+## Cómo se trabaja
+
+1. **Abre un plano o un modelo.** Arrastra el `.dxf` o `.dwg` a la pantalla de inicio (o pulsa
+   *Elegir archivo*). Si ya tienes la configuración del proyecto (`.yaml`), suéltala antes; si no,
+   Extrude genera una automática. También puedes reabrir un proyecto anterior o probar los ejemplos.
+2. **Revisa el resultado.** Al terminar aparece un resumen de calidad. En **Capas → Revisión del
+   proyecto** ves las capas pendientes y los edificios mal apoyados; *Aplicar y reconvertir* lo
+   corrige. Si una capa tiene el tipo equivocado (por ejemplo, una calle tratada como edificio),
+   cámbialo ahí.
+3. **Ajusta.** Cambia la altura de una capa desde **Capas**, asigna materiales en **Materiales** o
+   pide los cambios con palabras en **Editar proyecto con IA**.
+4. **Encuadra y guarda vistas.** Mueve la cámara, elige fecha y hora del sol y pulsa **N** (o
+   *Nueva vista*). Cada vista guarda cámara, sol, capas y entorno.
+5. **Presenta.** Desde cada vista: capturas **HD** o **4K**, imágenes con **IA** y la
+   **Biblioteca** con todo lo generado. El menú **Exportar** lleva el modelo a Blender y otros
+   programas.
+
+Atajos útiles: **F** encuadrar · **N** nueva vista · **M** medir · **Espacio** reproducir el día ·
+**Tab** ocultar paneles · doble clic para centrar en un punto.
+
+## Imágenes y edición con IA
+
+La IA es **opcional** y la activa quien administra Extrude (o tú, si lo usas en tu ordenador).
+Cada consulta o generación puede tener coste en la cuenta del proveedor, y siempre ves lo que se
+va a enviar antes de confirmarlo.
+
+| Función | Qué hace | Proveedor |
+|---|---|---|
+| Generar imagen | Crea una imagen de presentación a partir de una o varias vistas | OpenAI (GPT Image) o Google Gemini |
+| Mejorar con Claude | Propone una redacción mejor del texto de la imagen, mirando tus vistas | Anthropic (Claude) |
+| Editar proyecto con IA | Interpreta lo que escribes y propone cambios reales en el modelo | Claude u OpenAI |
+
+Claude no genera imágenes: redacta y edita. Para crear imágenes hace falta una clave de OpenAI o de
+Gemini.
+
+**Consejos para mejores imágenes:** empieza con un **rol** («Actúa como visualizador
+arquitectónico…»), pide **edificios completos** (ventanas en todas las plantas, plantas bajas,
+cubiertas acabadas), añade **gente y vida urbana**, concreta **luz y clima**, deja marcada la
+**leyenda de capas** y usa un encuadre cercano a lo que quieres mostrar. La IA reinterpreta la
+escena: compárala siempre con la captura original.
+
+**Activarla en tu ordenador (Docker):** crea un archivo `.env` en la carpeta de Extrude con las
+claves que tengas, una por línea, y vuelve a ejecutar `docker compose up -d`:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=...
 ```
 
-Abre **[localhost:8080](http://localhost:8080)**. Incluye el visor, los ejemplos y la API;
-no necesitas instalar Python, Node ni configurar dominio, certificados o usuarios.
-La primera construcción descarga las dependencias y puede tardar varios minutos.
-El puerto se publica solo en este ordenador, sin inicio de sesión.
+Ese archivo no se comparte ni se sube a Git. Con el servidor de desarrollo también puedes elegir
+modelos y límites con variables `EXTRUDE_*` en el mismo `.env` (por ejemplo
+`EXTRUDE_ANTHROPIC_MODEL=claude-sonnet-5-5`); la lista completa está en
+[docs/EDICION_IA.md](docs/EDICION_IA.md) y [docs/VISTAS_E_IMAGENES.md](docs/VISTAS_E_IMAGENES.md).
 
-```sh
-docker compose ps             # estado de los servicios
-docker compose logs -f        # ver registros (Ctrl+C para salir)
-docker compose down           # parar; conserva los datos
-docker compose up -d --build  # arrancar o reconstruir tras actualizar el código
-```
+## Problemas frecuentes
 
-Los trabajos se guardan en el volumen `extrude-local_projects`, con la retención del
-modo local (los 10 trabajos terminados más recientes). Las vistas se guardan en el
-navegador: usa siempre la misma dirección para recuperarlas. `docker compose down -v`
-borra el volumen de trabajos. La imagen admite DXF y GLB/GLTF; para DWG, convierte
-antes el plano a DXF, pues no incluye ODA ni LibreDWG.
+| Lo que ves | Qué hacer |
+|---|---|
+| No acepta mi DWG | Guárdalo como DXF desde tu programa de CAD. En servidores con conversor instalado, el DWG se acepta directamente |
+| El modelo sale diminuto o gigantesco | Las unidades del plano no son las esperadas: revisa las unidades en la configuración del proyecto |
+| Faltan edificios | Mira en el resumen de calidad las capas pendientes y cámbiales el tipo en **Capas → Revisión del proyecto** |
+| Edificios flotando o enterrados | **Capas → Revisión del proyecto → Aplicar y reconvertir** |
+| La IA confunde una calle con un muro | La capa de la calle está clasificada como edificio: cámbiala a «vial» en **Capas** y reconvierte. Deja marcada la leyenda de capas al generar |
+| Se enviaron vistas que no quería | Al pulsar **IA** en una vista solo se envía esa. Desde la Biblioteca, revisa las casillas del paso 1; **Revisar envío** muestra exactamente qué sale |
+| Mis vistas han desaparecido o se repiten | Las vistas viven en tu navegador: entra por la misma dirección y abre cada proyecto **en una sola pestaña** |
+| «El alcance tiene N objetos…» al editar con IA | Demasiados objetos para una consulta: marca los afectados o elige una capa (o pide que suban el límite) |
+| Un proveedor de IA aparece «no disponible» | Falta su clave en el servidor |
+| «El servidor… sigue ejecutando la versión anterior» | Hay que reiniciar el servidor (en Docker: `docker compose up -d --build`) |
 
-La IA es opcional: añade las claves necesarias (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`GEMINI_API_KEY`) a un archivo `.env` en la raíz, con una línea `NOMBRE=valor` por clave,
-y ejecuta de nuevo `docker compose up -d`. Ese archivo está excluido de Git y de las
-imágenes; las claves se pasan únicamente a la API. `extrude serve` en desarrollo lee el
-mismo archivo. No compartas la salida de
-`docker compose config` si has configurado claves.
+La **Guía** del visor tiene la lista completa de soluciones.
 
-Para un servidor con HTTPS y usuarios, utiliza el [despliegue de producción](deploy/README.md).
+## Limitaciones
+
+- **La configuración automática es un punto de partida.** Las alturas supuestas y los tipos de
+  capa deben revisarse con el proyecto; el resumen de calidad te dice cuáles.
+- **El zócalo bajo un edificio es una aproximación visual**, no una cimentación ni un cambio de la
+  topografía.
+- **Fuera del terreno dibujado** las cotas se estiman por proximidad; el informe lo avisa.
+- **Los sólidos ACIS no se convierten**: pásalos a malla en tu programa de CAD.
+- **Las imágenes de IA no son exactas**: pueden cambiar volúmenes o huecos. No modifican el modelo.
+- **Las vistas y la biblioteca se guardan en el navegador**: otro navegador u otro ordenador no
+  las ve (sí puedes exportarlas e importarlas).
+- **Los modelos muy grandes** se dividen en teselas; con teselas no está disponible la exportación
+  a Blender ni el GLB con cámaras.
+
+---
+
+## Para desarrolladores y administración
+
+Lo que sigue es para quien instala, mantiene o desarrolla Extrude. Para usarlo no hace falta.
 
 ### Entorno de desarrollo
 
@@ -94,7 +190,7 @@ automáticamente desde `samples/glb/`: puedes probar el visor sin un conversor D
 El servidor de conversión escucha en **[127.0.0.1:8765](http://127.0.0.1:8765/api/health)**.
 Para abrir únicamente GLB/GLTF o los ejemplos no hace falta arrancar `just serve`.
 
-### Sin just
+#### Sin just
 
 ```sh
 uv sync --project pipeline
@@ -105,7 +201,25 @@ npm ci --prefix tools
 Después, en terminales separadas: `uv run --project pipeline extrude serve` y
 `npm run dev --prefix viewer`.
 
-## Requisitos
+### Docker local: detalles
+
+Los trabajos se guardan en el volumen `extrude-local_projects`, con la retención del
+modo local (los 10 trabajos terminados más recientes). Las vistas se guardan en el
+navegador: usa siempre la misma dirección para recuperarlas. `docker compose down -v`
+borra el volumen de trabajos. La imagen admite DXF y GLB/GLTF; para DWG, convierte
+antes el plano a DXF, pues no incluye ODA ni LibreDWG.
+
+La IA es opcional: añade las claves necesarias (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`) a un archivo `.env` en la raíz, con una línea `NOMBRE=valor` por clave,
+y ejecuta de nuevo `docker compose up -d`. Ese archivo está excluido de Git y de las
+imágenes; las claves se pasan únicamente a la API. Docker solo pasa esas tres claves:
+las variables `EXTRUDE_*` (modelos y límites de la IA) se quedan en sus valores por defecto.
+`extrude serve` en desarrollo lee el mismo archivo completo, claves y `EXTRUDE_*`. No
+compartas la salida de `docker compose config` si has configurado claves.
+
+Para un servidor con HTTPS y usuarios, utiliza el [despliegue de producción](deploy/README.md).
+
+### Requisitos
 
 | Herramienta | Versión | Instalación |
 |---|---|---|
@@ -118,7 +232,7 @@ Después, en terminales separadas: `uv run --project pipeline extrude serve` y
 Las herramientas Node de `tools/` (validador glTF y `gltf-transform` para `--compress`) se
 instalan con `just setup-tools`.
 
-### Conversor DWG → DXF (opcional, uno de estos)
+#### Conversor DWG → DXF (opcional, uno de estos)
 
 Sin conversor, Extrude solo acepta `.dxf`. Comprueba lo que tienes con `just doctor`.
 
@@ -137,7 +251,7 @@ Sin conversor, Extrude solo acepta `.dxf`. Comprueba lo que tienes con `just doc
   - Ruta personalizada: `EXTRUDE_DWG2DXF_PATH`.
 - **Manual**: en AutoCAD/BricsCAD, `SAVEAS` → DXF (versión 2018 o 2013).
 
-## Comandos habituales
+### Comandos habituales
 
 ```sh
 just setup     # instala dependencias de pipeline, visor y herramientas glTF
@@ -146,7 +260,7 @@ just doctor    # conversores DWG→DXF disponibles
 just dev       # visor en http://localhost:5173
 ```
 
-## Inspeccionar un plano antes de convertir
+### Inspeccionar un plano antes de convertir
 
 `inspect` lee el dibujo sin generar 3D y muestra lo necesario para escribir el YAML de capas:
 unidades, bbox, entidades por tipo y por capa, ejemplos de textos (para el regex de plantas),
@@ -169,7 +283,7 @@ Muestras sintéticas en `samples/` (se regeneran con `just samples`):
 | `faces_3d.dxf` | 3DFACE, MESH, polyface, SOLID 2D y sólidos ACIS (no soportados), en milímetros |
 | `dirty.dxf` | Polilínea casi cerrada, LINE/ARC sueltas, duplicados, pajarita, área nula, SPLINE, HATCH con hueco |
 
-## Configuración por proyecto
+### Configuración por proyecto
 
 Las alturas y el significado de cada capa dependen del proyecto, así que se declaran en un YAML.
 `init-config` genera un borrador a partir del propio plano (detecta atributos de plantas, textos
@@ -182,7 +296,7 @@ uv run extrude init-config ../samples/block_2d.dxf -o ../proyecto.yaml
 
 Referencia completa: [docs/CONFIG.md](docs/CONFIG.md). Ejemplo comentado: `pipeline/config/example.yaml`.
 
-## Convertir
+### Convertir
 
 ```sh
 cd pipeline
@@ -205,7 +319,7 @@ Formatos: [docs/EXPORT_FORMATS.md](docs/EXPORT_FORMATS.md); requisitos de materi
 
 Con las muestras: `just convert-samples` y `just validate out/block_2d/model.glb`.
 
-## Convertir arrastrando al visor
+### Convertir arrastrando al visor
 
 ```sh
 just serve   # servidor local de conversión (http://127.0.0.1:8765)
@@ -254,7 +368,7 @@ el script de Blender, convierte sin teselas. La exportación Blender de teselas 
 
 Si el YAML tiene `crs` UTM (p. ej. `"EPSG:25830"`), el sol se sitúa en el centro del plano.
 
-## Visor
+### Referencia del visor
 
 Los modelos abiertos por URL resuelven sus buffers y texturas respecto a la URL final del
 modelo o de cada tesela, incluso tras redirecciones. Los archivos glTF elegidos desde el
@@ -312,7 +426,7 @@ Al aplicar materiales se quitan los colores de capa para no teñir las texturas.
 Atajos: **F** encuadrar · **N** nueva vista · **M** medir · **Espacio** reproducir el día ·
 **Tab** modo zen · **Esc** cerrar el hub o borrar la medición · doble clic: centrar en un punto. `?debug` expone la app en
 `window.__extrude`.
-### Vistas y exportación
+#### Vistas y exportación
 
 El panel **Vistas** (a la izquierda) permite:
 - guardar el estado actual (cámara, sol, luces, capas, entorno) con miniatura;
@@ -332,19 +446,8 @@ Detalles, conversiones y compatibilidad verificada: [docs/EXPORT_FORMATS.md](doc
 
 Convenio de ejes: el +Y del dibujo es el −Z de la escena. "Norte (° horario)" gira el norte
 real respecto al +Y del dibujo.
-## Limitaciones
 
-- **DWG necesita un conversor externo.** Sin ODA o LibreDWG puedes trabajar con DXF y los modelos de ejemplo.
-- **El YAML automático es un borrador.** Los valores por bloque, plantas y alturas por defecto deben contrastarse con el proyecto.
-- **El zócalo es una aproximación geométrica.** Mantiene la planta horizontal y llega al terreno; no calcula una cimentación estructural ni modifica la topografía.
-- **Fuera del TIN se extrapola por proximidad.** El informe avisa aunque el objeto parezca apoyado. La interpolación tampoco certifica la exactitud de las curvas originales.
-- **Altura cero representa una superficie.** Con apoyo automático sigue el terreno y no genera un zócalo.
-- **ACIS no se convierte directamente.** Los sólidos no soportados se enumeran en el informe; conviértelos a malla en el programa CAD.
-- **GLTF local debe ser autocontenido.** Para buffers o texturas auxiliares abre el modelo por URL, o prepara un GLB autocontenido.
-- **Teselas:** se pueden exportar vistas JSON; la exportación Blender y el GLB único con cámaras requieren una conversión sin teselas.
-- **Uso local:** el servidor limita trabajos y tamaño de entrada, pero no incluye autenticación ni está diseñado como servicio público multiusuario.
-
-## Desarrollo y validación
+### Desarrollo y validación
 
 ```sh
 just check                       # lint, formato, tipado y pruebas de Python y TypeScript
@@ -371,7 +474,7 @@ están instaladas. Las herramientas glTF se instalan con `just setup-tools`.
 La integración continua se define en [`.github/workflows/check.yml`](.github/workflows/check.yml).
 Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para el flujo de cambios.
 
-### API local
+#### API local
 
 | Método y ruta | Función |
 |---|---|
@@ -409,7 +512,7 @@ El cliente envía `Content-Type: application/octet-stream` y, opcionalmente,
 `X-Extrude-Config` con el YAML en Base64 UTF-8. `tiles` y `compress` son parámetros opcionales.
 Cola llena: **503** con `Retry-After`, sin leer el cuerpo. YAML inválido: **422** con diagnóstico.
 
-### Logo y favicon
+#### Logo y favicon
 
 La marca representa un volumen isométrico extruido. La geometría canónica está en
 [`viewer/scripts/make-icons.py`](viewer/scripts/make-icons.py); `just icons` usa Pillow en
@@ -429,7 +532,7 @@ Los recursos de marca están versionados. Los decodificadores y las copias de mo
 `viewer/public/models/` se preparan al ejecutar `dev` o `build`; no se versionan.
 El manifest no implica soporte sin conexión: no se incluye un service worker.
 
-## Rendimiento medido
+### Rendimiento medido
 
 Ciudad sintética (`just bench`): 50 000 edificios con rótulo de plantas y 12 500 árboles, en UTM.
 Medido en Windows 11 con Python 3.13 y una RTX 3050 Ti Laptop.
@@ -446,7 +549,7 @@ Resultado: 1 675 010 triángulos, 3 draw calls (los árboles instanciados) y un 
 En el visor, a 2133×950, se mantiene en **60 FPS** (límite de vsync) en Chrome, **con sombras**
 (mapa de 4096 ajustado a la zona visible; 3,35 M triángulos por fotograma contando la pasada de sombras).
 
-## Estructura
+### Estructura
 
 ```
 pipeline/   Python: CLI `extrude`, conversión, lectura DXF, extrusión, export GLB
@@ -459,7 +562,8 @@ docs/       Arquitectura, configuración y formatos de exportación
 
 ## Documentación
 
-- [Guía de uso completa](docs/GUIA_DE_USO.md)
+- Guía de uso dentro del visor (botón **Guía**): pensada para quien usa Extrude
+- [Guía de uso detallada, con línea de comandos](docs/GUIA_DE_USO.md)
 - [Configuración por capa y fuentes de altura](docs/CONFIG.md)
 - [Formatos de exportación y coordenadas](docs/EXPORT_FORMATS.md)
 - [Arquitectura y decisiones técnicas](docs/ARCHITECTURE.md)
