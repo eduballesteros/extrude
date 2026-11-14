@@ -19,7 +19,8 @@ import {
   viewToState,
 } from './viewState';
 
-export const GENERATOR = 'extrude-viewer 0.1.0';
+/** Versión del visor (package.json, inyectada por Vite) en views.json y en el script de Blender. */
+export const GENERATOR = `extrude-viewer ${(import.meta.env['VITE_APP_VERSION'] as string | undefined) ?? 'dev'}`;
 
 type Listener = () => void;
 

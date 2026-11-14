@@ -1,6 +1,6 @@
 """Identidad de la ejecución: qué código tiene cargado ESTE proceso.
 
-La versión del paquete (0.1.0) no distingue dos ejecuciones del mismo repositorio. Un servidor
+La versión del paquete no distingue dos ejecuciones del mismo repositorio. Un servidor
 arrancado antes de un cambio sigue con el código antiguo en memoria aunque los archivos del
 disco ya sean otros, y eso no se arregla recargando el visor.
 

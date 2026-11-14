@@ -2,6 +2,24 @@
 
 ## Sin publicar
 
+_Nada todavía._
+
+## 1.0.0 — 2026-11-14
+
+Primera versión estable: del plano al modelo 3D, su revisión, materiales, vistas e imágenes
+de presentación con IA, todo desde el visor web, en local con Docker o en un servidor.
+
+### Instalación en Windows con icono
+
+- `Instalar Extrude.bat`: crea los accesos directos **Extrude** (escritorio y menú Inicio) y
+  **Actualizar Extrude**, prepara el archivo de claves de IA y deja Extrude listo.
+- El icono arranca Docker Desktop si hace falta, levanta Extrude y lo abre en su propia ventana
+  (modo aplicación de Edge o Chrome), siempre en el mismo navegador para conservar vistas e
+  imágenes. Guía: `docs/INSTALAR_WINDOWS.md`.
+- La imagen de Docker incluye LibreDWG 0.14 (`dwg2dxf`), compilado desde el código fuente
+  oficial con su suma verificada: los planos DWG se aceptan directamente, sin convertirlos
+  antes a DXF.
+
 ### La IA de imágenes distingue viales de edificios
 
 - Leyenda de capas opcional en «Generar con IA» (marcada por defecto): explica al generador
@@ -24,27 +42,20 @@
   rol para el generador y pide edificios completos con ventanas en todas las plantas y una
   escala humana realista.
 
+### Correcciones
+
+- «Generar con IA» abierto desde una vista envía solo esa vista; antes se sumaban, sin
+  avisar, las elegidas la vez anterior.
+- La edición del proyecto con Claude funciona contra la API real: el esquema de respuesta
+  superaba los límites de Anthropic y toda propuesta fallaba con HTTP 400.
+- Los nombres de las vistas nuevas no se repiten al borrar una anterior.
+
 ### Claves de IA en un único .env
 
 - `extrude serve` carga las claves de IA (y las variables `EXTRUDE_*`) del `.env` de la raíz
   del repositorio, el mismo de Docker local. El entorno manda sobre el archivo; muestra solo
   los nombres cargados. `--env-file` y `--no-env-file`; producción usa `--no-env-file` y
   sigue tomando las claves del secreto de Compose.
-
-### Correcciones de la auditoría del servidor
-
-- El hilo de conversión ya no muere ante un error al registrar otro error: el trabajo acaba
-  en «failed» y los siguientes se convierten; el registro nunca lanza.
-- Un segundo `extrude serve` en el mismo puerto falla con un mensaje claro (en Windows el
-  puerto es exclusivo: antes arrancaba y se repartían las conexiones).
-- `--allowed-host` exige el Host también al escuchar en todas las interfaces (Docker local y
-  producción), contra DNS rebinding; Caddy local solo atiende `localhost` y `127.0.0.1`.
-- Límites de acceso por cliente y usuario y por cliente en total (`--trust-forwarded` detrás
-  de Caddy); los fallos de un tercero ya no bloquean al dueño de la cuenta; claves acotadas.
-- Los estados de trabajos terminados no guardan el informe en memoria (se lee de disco).
-- El contacto de los objetos que siguen la pendiente se mide en la malla.
-- Solo se aceptan los EPSG UTM que existen; el visor rechaza un YAML demasiado grande con un
-  mensaje claro y no propone comandos si el servidor es web.
 
 ### Rendimiento y conexiones lentas
 
@@ -60,6 +71,23 @@
 
 - Arranque del visor y la API con `docker compose up -d --build`, accesible en
   `http://localhost:8080`, con volumen de trabajos y claves de IA opcionales.
+
+## 0.1.0 — 2026-11-13
+
+### Correcciones de la auditoría del servidor
+
+- El hilo de conversión ya no muere ante un error al registrar otro error: el trabajo acaba
+  en «failed» y los siguientes se convierten; el registro nunca lanza.
+- Un segundo `extrude serve` en el mismo puerto falla con un mensaje claro (en Windows el
+  puerto es exclusivo: antes arrancaba y se repartían las conexiones).
+- `--allowed-host` exige el Host también al escuchar en todas las interfaces (Docker local y
+  producción), contra DNS rebinding; Caddy local solo atiende `localhost` y `127.0.0.1`.
+- Límites de acceso por cliente y usuario y por cliente en total (`--trust-forwarded` detrás
+  de Caddy); los fallos de un tercero ya no bloquean al dueño de la cuenta; claves acotadas.
+- Los estados de trabajos terminados no guardan el informe en memoria (se lee de disco).
+- El contacto de los objetos que siguen la pendiente se mide en la malla.
+- Solo se aceptan los EPSG UTM que existen; el visor rechaza un YAML demasiado grande con un
+  mensaje claro y no propone comandos si el servidor es web.
 
 ### Apoyo sobre el terreno y revisión del proyecto
 
@@ -126,7 +154,7 @@
 - Integración continua, guía de contribución y plantilla de revisión.
 - `just inspect` protege rutas con espacios y apóstrofos.
 
-## 0.1.0 — Base del proyecto
+### Base del proyecto
 
 Pipeline DXF/DWG a GLB, visor Three.js, control solar, capas, vistas guardadas y exportaciones
 a PNG, views.json, Blender y GLB con cámaras y luces. El historial Git conserva su desarrollo.

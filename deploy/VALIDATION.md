@@ -45,5 +45,6 @@ combinación Linux aquí. No hay Docker en este entorno.
 - Ensayo de backup/restore sobre volúmenes Docker reales y release conservada.
 - Validación con planos representativos, carga sostenida, crecimiento de revisiones,
   disco lleno, OOM y cortes durante escritura. No hay garantía transaccional global.
-- DWG requiere una imagen derivada con conversor externo validado. No se declara
-  soporte DWG en la imagen base ni aprobación general para producción.
+- DWG: la imagen incluye LibreDWG 0.14 (`dwg2dxf`), compilado desde el código fuente oficial
+  con suma verificada. Validado con un DWG de muestra; los DWG muy recientes pueden fallar y
+  entonces se recomienda DXF 2018. No implica aprobación general para producción.

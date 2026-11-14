@@ -4,3 +4,7 @@
 *.png binary
 *.hdr binary
 *.exr binary
+*.ico binary
+# Scripts de Windows: finales de línea de Windows
+*.bat text eol=crlf
+*.ps1 text eol=crlf

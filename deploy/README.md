@@ -13,7 +13,7 @@ retención, vigilancia y procedimientos conservadores de mantenimiento.
 | API HTTP | 16 conexiones/hilos como máximo, timeout de socket 30 s, ritmo mínimo de subida (16 kB/s tras 30 s), 2 subidas simultáneas por usuario, proceso único tras proxy | Servidor HTTP de producción, límites globales por IP y pruebas de carga sostenida |
 | Conversión | 1 conversión activa + 4 admitidas; 503 y Retry-After al saturar | Cola durable, cancelación de procesos y aislamiento por trabajo |
 | Archivos no confiables | Usuarios conocidos, contenedor sin privilegios y recursos limitados | Sandbox por conversión antes de aceptar registros públicos o usuarios hostiles |
-| DWG | **Bloqueado en la imagen base**: no lleva ODA ni LibreDWG. DXF funciona sin conversor | Imagen derivada con conversor Linux y licencias/dependencias verificadas |
+| DWG | LibreDWG 0.14 (`dwg2dxf`, GPL-3.0) compilado en la imagen desde el código fuente oficial con suma SHA-256 fijada. Sin ODA. Algunos DWG muy recientes pueden fallar: DXF 2018 como alternativa | Valorar ODA File Converter (licencia propia) si LibreDWG no basta |
 | Persistencia | Proyectos, permisos, revisiones y cuentas en volúmenes; copia con servicios detenidos | Cuotas por bytes, borrado desde administración y monitorización central |
 | Reinicios | Sesiones, cola, estados de sondeo e imágenes en curso no sobreviven | Recuperación durable y reconciliación de operaciones interrumpidas |
 | Evidencia | Build y pruebas locales según `VALIDATION.md` | Construir/probar Docker, TLS, restauración y GLB comprimido en Linux antes de abrir tráfico |
