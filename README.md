@@ -144,7 +144,8 @@ modelos y límites con variables `EXTRUDE_*` en el mismo `.env` (por ejemplo
 | Edificios flotando o enterrados | **Capas → Revisión del proyecto → Aplicar y reconvertir** |
 | La IA confunde una calle con un muro | La capa de la calle está clasificada como edificio: cámbiala a «vial» en **Capas** y reconvierte. Deja marcada la leyenda de capas al generar |
 | Se enviaron vistas que no quería | Al pulsar **IA** en una vista solo se envía esa. Desde la Biblioteca, revisa las casillas del paso 1; **Revisar envío** muestra exactamente qué sale |
-| Mis vistas han desaparecido o se repiten | Las vistas viven en tu navegador: entra por la misma dirección y abre cada proyecto **en una sola pestaña** |
+| Mis vistas han desaparecido | Las vistas viven en tu navegador: entra siempre por la misma dirección (o con el icono de Extrude) |
+| «Este proyecto ya está abierto en otra ventana» | Lo has abierto dos veces: esa ventana no guarda las vistas para no borrar las de la otra. Cierra una de las dos |
 | «El alcance tiene N objetos…» al editar con IA | Demasiados objetos para una consulta: marca los afectados o elige una capa (o pide que suban el límite) |
 | Un proveedor de IA aparece «no disponible» | Falta su clave en el servidor |
 | «El servidor… sigue ejecutando la versión anterior» | Hay que reiniciar el servidor (en Docker: `docker compose up -d --build`) |
