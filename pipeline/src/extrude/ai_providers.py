@@ -94,6 +94,8 @@ class AnthropicProvider:
 
     id: str = "anthropic"
     name: str = "Claude (Anthropic)"
+    # Esquema compacto: el completo supera los límites de gramática de la API (ver ai_planner)
+    compact_schema: bool = True
     model: str = field(
         default_factory=lambda: _env("EXTRUDE_ANTHROPIC_MODEL") or ANTHROPIC_DEFAULT_MODEL
     )
