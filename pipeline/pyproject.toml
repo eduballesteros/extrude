@@ -1,6 +1,6 @@
 [project]
 name = "extrude"
-version = "0.1.0"
+version = "1.0.0"
 description = "Pipeline DWG/DXF → glTF 3D con metadatos por capa"
 requires-python = ">=3.12"
 dependencies = [
