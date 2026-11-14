@@ -4,6 +4,7 @@ import { LayerManager } from './layers';
 import {
   isManifestUrl,
   loadFromManifest,
+  TILE_LOOKAHEAD,
   type Manifest,
   manifestExtras,
   parseManifest,
@@ -183,6 +184,73 @@ describe('loadFromManifest', () => {
     layers.apply({ EDIFICIOS: { visible: false }, VIALES: { visible: true } });
     expect(edificios.nodes.every((n) => !n.visible)).toBe(true);
     expect(layers.layers.get('VIALES')!.nodes[0]!.visible).toBe(true);
+  });
+
+  it('descarga en paralelo sin retener más de TILE_LOOKAHEAD teselas a la vez', async () => {
+    const count = 10;
+    const tiles = Array.from({ length: count }, (_, i) => ({
+      id: `${i}_0`,
+      file: `tiles/tile_${i}_0.glb`,
+      bbox: null,
+      triangles: 1,
+      size_bytes: 100,
+    }));
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('manifest.json'))
+          return new Response(JSON.stringify({ ...manifest(), tiles }));
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight--;
+        return new Response(tileGlb({ EDIFICIOS: 1 }));
+      }),
+    );
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => setTimeout(cb, 0));
+    const progress: [string, number | null][] = [];
+
+    const model = await loadFromManifest(`${base}manifest.json`, 'ciudad', (stage, fraction) => {
+      progress.push([stage, fraction]);
+    });
+
+    expect(model.root.children.map((c: Object3D) => c.name)).toEqual(tiles.map((t) => t.id));
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(TILE_LOOKAHEAD);
+    const downloads = progress
+      .filter(([s, f]) => s === 'download' && f !== null)
+      .map(([, f]) => f!);
+    expect(downloads.every((f, i) => i === 0 || f >= downloads[i - 1]!)).toBe(true);
+    expect(progress.at(-1)).toEqual(['parse', 1]);
+  });
+
+  it('cancela las demás descargas si una tesela falla', async () => {
+    const tiles = Array.from({ length: 6 }, (_, i) => ({
+      id: `${i}_0`,
+      file: `tiles/tile_${i}_0.glb`,
+      bbox: null,
+      triangles: 1,
+      size_bytes: 1,
+    }));
+    const aborted: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.endsWith('manifest.json'))
+          return Promise.resolve(new Response(JSON.stringify({ ...manifest(), tiles })));
+        if (url.includes('tile_0_0')) return Promise.resolve(new Response('no', { status: 404 }));
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            aborted.push(url);
+            reject(new DOMException('cancelada', 'AbortError'));
+          });
+        });
+      }),
+    );
+    await expect(loadFromManifest(`${base}manifest.json`)).rejects.toThrow(/HTTP 404/);
+    expect(aborted.length).toBe(TILE_LOOKAHEAD - 1);
   });
 
   it('falla con un mensaje claro si falta una tesela', async () => {

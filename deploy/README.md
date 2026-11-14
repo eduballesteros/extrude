@@ -10,7 +10,7 @@ retención, vigilancia y procedimientos conservadores de mantenimiento.
 
 | Área | Para el primer despliegue | Trabajo posterior |
 | --- | --- | --- |
-| API HTTP | 16 conexiones/hilos como máximo, timeout de socket 30 s, proceso único tras proxy | Servidor HTTP de producción, límites globales por IP y pruebas de carga sostenida |
+| API HTTP | 16 conexiones/hilos como máximo, timeout de socket 30 s, ritmo mínimo de subida (16 kB/s tras 30 s), 2 subidas simultáneas por usuario, proceso único tras proxy | Servidor HTTP de producción, límites globales por IP y pruebas de carga sostenida |
 | Conversión | 1 conversión activa + 4 admitidas; 503 y Retry-After al saturar | Cola durable, cancelación de procesos y aislamiento por trabajo |
 | Archivos no confiables | Usuarios conocidos, contenedor sin privilegios y recursos limitados | Sandbox por conversión antes de aceptar registros públicos o usuarios hostiles |
 | DWG | **Bloqueado en la imagen base**: no lleva ODA ni LibreDWG. DXF funciona sin conversor | Imagen derivada con conversor Linux y licencias/dependencias verificadas |
@@ -21,9 +21,13 @@ retención, vigilancia y procedimientos conservadores de mantenimiento.
 No usar varias réplicas, gunicorn workers ni dos procesos sobre los volúmenes:
 sesiones, límites, cola y bloqueos de proyecto son de memoria. Un proxy no resuelve
 esto. El límite HTTP evita crecimiento ilimitado de hilos; no constituye defensa
-completa contra abuso distribuido. El login limita fallos por nombre, no por IP;
-un atacante puede alternar nombres y ocupar las 16 conexiones. Para un servicio
-abierto a desconocidos faltan protección de acceso en red y validación bajo carga.
+completa contra abuso distribuido. El login limita fallos por cliente y usuario y por
+cliente en total, con la IP real que añade Caddy. Las conexiones lentas se ensayaron
+(16 a la vez): Caddy absorbe las cabeceras que no terminan de llegar y la API corta
+las subidas por debajo del ritmo mínimo, liberando la cola. Sin Caddy delante, 16
+peticiones que nunca terminan su cabecera ocupan todos los huecos: no exponer
+`extrude serve` directamente a la red. Para un servicio abierto a desconocidos faltan
+protección de acceso en red y validación bajo carga sostenida.
 Mantener usuarios invitados y restringir acceso en el firewall hasta validarlo.
 
 ## Preparar un servidor limpio

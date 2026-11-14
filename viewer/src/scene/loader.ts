@@ -280,9 +280,18 @@ export async function loadFromFile(
 }
 
 /**
- * Carga un conjunto teselado: descarga el manifest.json y todas sus teselas (rutas relativas al
+ * Teselas descargadas por adelantado: limita a la vez las descargas simultáneas y los búferes
+ * que esperan a analizarse, así la memoria no crece con el número de teselas.
+ */
+export const TILE_LOOKAHEAD = 4;
+
+/**
+ * Carga un conjunto teselado: descarga el manifest.json y sus teselas (rutas relativas al
  * manifest) y agrupa sus raíces en un único Group. Como comparten `origin_offset`, se colocan
- * juntas sin desplazarlas. El progreso de descarga se mide con `size_bytes` del manifest.
+ * juntas sin desplazarlas. Las teselas se descargan en paralelo (hasta `TILE_LOOKAHEAD`) y cada
+ * una se analiza en cuanto llega, en el orden del manifest; su búfer se suelta al analizarla.
+ * El progreso de descarga se mide con `size_bytes` del manifest; al terminar las descargas, el
+ * del análisis con el número de teselas.
  */
 export async function loadFromManifest(
   url: string,
@@ -295,34 +304,66 @@ export async function loadFromManifest(
   const response = await (signal ? fetch(url, { signal }) : fetch(url));
   if (!response.ok) throw new ModelDownloadError(response.status, url);
   const manifest = parseManifest(await response.json());
-  const total = manifest.tiles.reduce((sum, t) => sum + (t.size_bytes || 0), 0);
-  let done = 0;
-  const buffers: { bytes: ArrayBuffer; url: string }[] = [];
-  const manifestUrl = response.url || url;
-  for (const tile of manifest.tiles) {
-    const tileUrl = new URL(tile.file, new URL(manifestUrl, globalThis.location?.href)).toString();
-    buffers.push(
-      await downloadResource(
-        tileUrl,
+  const tiles = manifest.tiles;
+  const manifestUrl = new URL(response.url || url, globalThis.location?.href);
+  const total = tiles.reduce((sum, t) => sum + (t.size_bytes || 0), 0);
+  const received = new Array<number>(tiles.length).fill(0);
+  let downloading = tiles.length;
+  let measurable = total > 0;
+  const reportDownload = (): void => {
+    if (!measurable) return onProgress?.('download', null);
+    const sum = received.reduce((a, b) => a + b, 0);
+    onProgress?.('download', Math.min(sum / total, 1));
+  };
+
+  // Si falla una tesela, se cancelan las demás descargas en curso.
+  const controller = new AbortController();
+  const abort = (): void => controller.abort(signal?.reason);
+  signal?.addEventListener('abort', abort, { once: true });
+  const pending = new Map<number, Promise<{ bytes: ArrayBuffer; url: string }>>();
+  let next = 0;
+  const startDownloads = (parsed: number): void => {
+    while (next < tiles.length && next < parsed + TILE_LOOKAHEAD) {
+      const i = next++;
+      const tile = tiles[i]!;
+      const download = downloadResource(
+        new URL(tile.file, manifestUrl).toString(),
         (_stage, fraction) => {
-          if (!total || fraction === null) return onProgress?.('download', null);
-          onProgress?.('download', Math.min((done + fraction * tile.size_bytes) / total, 1));
+          if (fraction === null) measurable = false;
+          else received[i] = fraction * (tile.size_bytes || 0);
+          reportDownload();
         },
-        signal,
-      ),
-    );
-    done += tile.size_bytes || 0;
-  }
-  onProgress?.('parse', null);
-  await nextFrame();
+        controller.signal,
+      ).finally(() => {
+        downloading--;
+      });
+      // El error se atiende al esperarla en orden; evita avisos de promesa sin atender.
+      download.catch(() => undefined);
+      pending.set(i, download);
+    }
+  };
+
   const loader = createLoader();
   const root = new Group();
   root.name = name ?? 'tiles';
-  for (const [i, resource] of buffers.entries()) {
-    const gltf = await loader.parseAsync(resource.bytes, resourceBase(resource.url));
-    gltf.scene.name = manifest.tiles[i]!.id;
-    root.add(gltf.scene);
+  try {
+    for (let i = 0; i < tiles.length; i++) {
+      startDownloads(i);
+      const resource = await pending.get(i)!;
+      pending.delete(i);
+      if (downloading === 0) onProgress?.('parse', i / tiles.length);
+      await nextFrame();
+      const gltf = await loader.parseAsync(resource.bytes, resourceBase(resource.url));
+      gltf.scene.name = tiles[i]!.id;
+      root.add(gltf.scene);
+    }
+  } catch (error) {
+    controller.abort();
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', abort);
   }
+  onProgress?.('parse', 1);
   const extras = manifestExtras(manifest);
   root.userData = { ...extras };
   return {

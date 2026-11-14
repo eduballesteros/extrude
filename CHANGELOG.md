@@ -17,6 +17,16 @@
 - Solo se aceptan los EPSG UTM que existen; el visor rechaza un YAML demasiado grande con un
   mensaje claro y no propone comandos si el servidor es web.
 
+### Rendimiento y conexiones lentas
+
+- Las teselas de un conjunto se descargan en paralelo (hasta 4) y cada una se analiza al
+  llegar, soltando su búfer: la memoria ya no crece con el número de teselas.
+- El visor arranca con un 31 % menos de JavaScript (391 → 270 kB gzip): las tablas de la
+  luz de área, los cargadores de HDRI y el diálogo de generación con IA se descargan al usarse.
+- Una subida por debajo de 16 kB/s (pasados 30 s) se corta con 408: cinco subidas que
+  goteaban bloqueaban la cola de conversión de todos. En modo compartido, como máximo dos
+  subidas simultáneas por usuario.
+
 ### Docker local
 
 - Arranque del visor y la API con `docker compose up -d --build`, accesible en

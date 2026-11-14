@@ -4,8 +4,10 @@ estados sin el informe en memoria y diagnóstico medido de lo adaptado al terren
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
+import socket
 import sys
 import threading
 import time
@@ -279,3 +281,77 @@ def test_only_real_utm_epsg_codes_are_accepted() -> None:
     assert to_wgs84("EPSG:25801", 440291, 4474254) is None
     lat, lon = to_wgs84("EPSG:25830", 440291, 4474254)  # type: ignore[misc]
     assert lat == pytest.approx(40.4168, abs=1e-4) and lon == pytest.approx(-3.7038, abs=1e-4)
+
+
+# --- I4: subidas lentas ------------------------------------------------------------------------
+
+
+def _slow_upload(base: str, headers: dict[str, str] | None = None) -> socket.socket:
+    """Abre una subida válida de 100 kB y envía solo la cabecera y un byte."""
+    host, port = base.removeprefix("http://").split(":")
+    sock = socket.create_connection((host, int(port)), timeout=10)
+    extra = "".join(f"{k}: {v}\r\n" for k, v in (headers or {}).items())
+    sock.sendall(
+        f"POST /api/convert?name=lento.dxf&async=1 HTTP/1.1\r\nHost: {host}:{port}\r\n"
+        f"Origin: {ORIGIN}\r\nContent-Type: application/octet-stream\r\n{extra}"
+        f"Content-Length: 100000\r\n\r\n0".encode()
+    )
+    return sock
+
+
+def _drip_until_answered(sock: socket.socket, seconds: float) -> bytes:
+    """Gotea un byte cada 0,1 s hasta que el servidor responde (o se agota el tiempo)."""
+    sock.settimeout(0.1)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            answer = sock.recv(4096)
+            if answer:
+                return answer
+        except TimeoutError:
+            pass
+        with contextlib.suppress(OSError):
+            sock.sendall(b"0")
+    return b""
+
+
+def test_slow_uploads_are_cut_and_free_the_conversion_queue(
+    server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(srv, "UPLOAD_GRACE_S", 0.3)
+    monkeypatch.setattr(srv, "UPLOAD_MIN_BYTES_PER_S", 10_000)
+    slow = [_slow_upload(server) for _ in range(srv.MAX_WAITING + 1)]
+    try:
+        time.sleep(0.2)
+        code, _ = call(f"{server}/api/convert?name=p.dxf&async=1", DXF)
+        assert code == 503  # la cola está ocupada por las subidas lentas
+        answers = [_drip_until_answered(sock, 5) for sock in slow]
+        assert all(b" 408 " in a.split(b"\r\n")[0] for a in answers), answers
+        assert convert(server)["state"] == "pending"  # y el hueco vuelve a estar libre
+    finally:
+        for sock in slow:
+            sock.close()
+
+
+def test_shared_mode_limits_simultaneous_uploads_per_user(tmp_path: Path) -> None:
+    mode = _shared(tmp_path)
+    instance, base = start(tmp_path, shared=mode)
+    body = json.dumps({"user": "ana", "password": "contraseña-larga-ana"}).encode()
+    _, session = call(f"{base}/api/auth/login", body, {"Content-Type": "application/json"})
+    auth = {"Authorization": f"Bearer {session['token']}"}
+    slow = [_slow_upload(base, auth) for _ in range(srv.MAX_UPLOADS_PER_CLIENT)]
+    try:
+        time.sleep(0.2)
+        code, error = call(f"{base}/api/convert?name=p.dxf&async=1", DXF, auth)
+        assert code == 429, error
+        assert "a la vez" in error["error"]
+        for sock in slow:
+            sock.close()
+        deadline = time.monotonic() + TIMEOUT_S
+        while (code := call(f"{base}/api/convert?name=p.dxf&async=1", DXF, auth)[0]) == 429:
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+        assert code == 202  # al cortarse las subidas, el usuario vuelve a poder subir
+    finally:
+        instance.shutdown()
+        instance.server_close()
