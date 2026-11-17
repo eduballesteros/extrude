@@ -1,7 +1,7 @@
 {
   "name": "extrude-viewer",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "predev": "node scripts/copy-decoders.mjs && node scripts/copy-samples.mjs",

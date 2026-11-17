@@ -2,6 +2,10 @@
 
 ## Sin publicar
 
+_Nada todavía._
+
+## 1.0.1 — 2026-11-14
+
 - Abrir el mismo proyecto en dos ventanas ya no borra vistas: solo guarda la primera; la
   segunda avisa y no guarda, y toma el relevo sola (conservando sus vistas nuevas) cuando la
   primera se cierra o cierra el proyecto. Usa Web Locks del navegador.

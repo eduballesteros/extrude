@@ -310,7 +310,7 @@ o compartirlas, exporta `views.json`.
 ```json
 {
   "schemaVersion": 1,
-  "generator": "extrude-viewer 1.0.0",
+  "generator": "extrude-viewer 1.0.1",
   "coordinateSystem": {
     "units": "m", "up": "Y",
     "axisTransform": "(x, y, z)_dwg -> (x, z, -y)_gltf",
